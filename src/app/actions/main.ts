@@ -58,16 +58,14 @@ export async function fetchTopicCards(userId: string): Promise<TopicCard[]> {
 
     const { data: topic } = await supabase
       .from('topics')
-      .select('id, content, first_sentences')
+      .select('id, content')
       .eq('id', randomId)
       .single()
 
     if (!topic) continue
 
-    const sentences: string[] = topic.first_sentences ?? []
-    const firstSentence = sentences[Math.floor(Math.random() * sentences.length)] ?? ''
-
-    cards.push({ id: topic.id, content: topic.content, firstSentence, category })
+    // 첫 문장은 카드 클릭 시 /api/first-sentences에서 실시간 스트리밍 생성
+    cards.push({ id: topic.id, content: topic.content, firstSentence: '', category })
     used.add(category)
   }
 

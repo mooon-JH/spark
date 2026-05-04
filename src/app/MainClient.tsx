@@ -8,7 +8,13 @@ import type { TopicCard } from './actions/main'
 type Props = {
   userId: string
   initialCards: TopicCard[]
-  writtenDates: string[] // ['2026-05-01', '2026-05-02', ...]
+  writtenDates: string[]
+}
+
+type FirstSentenceState = {
+  topicId: string
+  sentences: string[]
+  streaming: boolean
 }
 
 export default function MainClient({ userId, initialCards, writtenDates }: Props) {
@@ -17,6 +23,7 @@ export default function MainClient({ userId, initialCards, writtenDates }: Props
   const [isPending, startTransition] = useTransition()
   const [calOpen, setCalOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [firstSentenceState, setFirstSentenceState] = useState<FirstSentenceState | null>(null)
 
   const today = new Date()
   const todayStr = today.toISOString().slice(0, 10)
@@ -24,17 +31,56 @@ export default function MainClient({ userId, initialCards, writtenDates }: Props
 
   // 새로고침
   const handleRefresh = () => {
+    setFirstSentenceState(null)
     startTransition(async () => {
       const next = await fetchTopicCards(userId)
       setCards(next)
     })
   }
 
-  // 카드 클릭 → 에디터
-  const handleCardClick = (card: TopicCard) => {
-    router.push(
-      `/editor?topicId=${card.id}&firstSentence=${encodeURIComponent(card.firstSentence)}`
-    )
+  // 카드 클릭 → 첫 문장 스트리밍 요청
+  const handleCardClick = async (card: TopicCard) => {
+    // 이미 이 카드의 첫 문장이 로드됐으면 바로 에디터로
+    if (firstSentenceState?.topicId === card.id && firstSentenceState.sentences.length > 0) {
+      const sentence = firstSentenceState.sentences[0]
+      router.push(`/editor?topicId=${card.id}&firstSentence=${encodeURIComponent(sentence)}`)
+      return
+    }
+
+    // 스트리밍 시작
+    setFirstSentenceState({ topicId: card.id, sentences: [], streaming: true })
+
+    try {
+      const res = await fetch('/api/first-sentences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topicContent: card.content }),
+      })
+
+      const reader = res.body?.getReader()
+      if (!reader) return
+
+      let accumulated = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        accumulated += new TextDecoder().decode(value)
+      }
+
+      // JSON 파싱
+      const cleaned = accumulated.replace(/```json|```/g, '').trim()
+      const sentences: string[] = JSON.parse(cleaned)
+
+      setFirstSentenceState({ topicId: card.id, sentences, streaming: false })
+
+      // 첫 번째 문장으로 바로 에디터 진입
+      router.push(
+        `/editor?topicId=${card.id}&firstSentence=${encodeURIComponent(sentences[0] ?? '')}`
+      )
+    } catch {
+      setFirstSentenceState(null)
+      router.push(`/editor?topicId=${card.id}&firstSentence=`)
+    }
   }
 
   // 자유 주제
@@ -63,11 +109,7 @@ export default function MainClient({ userId, initialCards, writtenDates }: Props
           <span className="text-base font-medium tracking-tight">spark</span>
         </div>
         <nav className="flex flex-col px-4 py-4 gap-1">
-          <SidebarItem
-            label="✦  글감 홈"
-            active
-            onClick={() => setSidebarOpen(false)}
-          />
+          <SidebarItem label="✦  글감 홈" active onClick={() => setSidebarOpen(false)} />
           <SidebarItem
             label="☰  내 글"
             onClick={() => { setSidebarOpen(false); router.push('/archive') }}
@@ -104,7 +146,7 @@ export default function MainClient({ userId, initialCards, writtenDates }: Props
             <span className="block w-[18px] h-[1.5px] bg-zinc-800" />
           </button>
           <span className="text-base font-medium tracking-tight">spark</span>
-          <div className="w-7" /> {/* 우측 균형 */}
+          <div className="w-7" />
         </header>
 
         {/* 캘린더 */}
@@ -146,6 +188,7 @@ export default function MainClient({ userId, initialCards, writtenDates }: Props
                 key={card.id}
                 card={card}
                 index={i}
+                loading={firstSentenceState?.topicId === card.id && firstSentenceState.streaming}
                 dimmed={isPending}
                 onClick={() => handleCardClick(card)}
               />
@@ -187,24 +230,14 @@ function CalendarSection({
 }) {
   const year = today.getFullYear()
   const month = today.getMonth()
-
-  // 이번 달 첫째 날의 요일 (0=일)
   const firstDow = new Date(year, month, 1).getDay()
-  // 이번 달 마지막 날
   const lastDate = new Date(year, month + 1, 0).getDate()
-
-  // 오늘이 속한 주의 일요일 날짜
   const todayDate = today.getDate()
   const todayDow = today.getDay()
-  const weekStart = todayDate - todayDow // 이번 주 일요일
-
-  // 이번 주 날짜 배열 (1~lastDate 범위 안에서)
+  const weekStart = todayDate - todayDow
   const thisWeekDates = Array.from({ length: 7 }, (_, i) => weekStart + i)
-
-  const monthLabel = `${month + 1}월`
   const DAYS = ['일', '월', '화', '수', '목', '금', '토']
 
-  // 날짜 → 'YYYY-MM-DD'
   const toDateStr = (d: number) =>
     `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 
@@ -239,13 +272,9 @@ function CalendarSection({
 
   return (
     <div>
-      {/* 캘린더 헤더 */}
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between mb-3"
-      >
+      <button onClick={onToggle} className="w-full flex items-center justify-between mb-3">
         <span className="text-[12px] font-medium text-zinc-900">
-          {monthLabel}
+          {month + 1}월
           <span className="text-zinc-400 font-normal ml-2 text-[11px]">
             {writtenCount}편 작성
           </span>
@@ -261,16 +290,12 @@ function CalendarSection({
         </span>
       </button>
 
-      {/* DOW 헤더 */}
       <div className="grid grid-cols-7 mb-1">
         {DAYS.map((d) => (
-          <div key={d} className="text-center text-[9px] text-zinc-400 pb-1">
-            {d}
-          </div>
+          <div key={d} className="text-center text-[9px] text-zinc-400 pb-1">{d}</div>
         ))}
       </div>
 
-      {/* 접힌 상태: 오늘 포함 주만 */}
       {!calOpen && (
         <div className="grid grid-cols-7">
           {thisWeekDates.map((d, i) =>
@@ -279,20 +304,10 @@ function CalendarSection({
         </div>
       )}
 
-      {/* 펼친 상태: 전체 월 */}
       {calOpen && (
-        <div
-          className="grid grid-cols-7"
-          style={{ transition: 'all 0.3s ease' }}
-        >
-          {/* 앞 빈 칸 */}
-          {Array.from({ length: firstDow }, (_, i) =>
-            renderDot(null, `e${i}`)
-          )}
-          {/* 날짜 */}
-          {Array.from({ length: lastDate }, (_, i) =>
-            renderDot(i + 1, `d${i + 1}`)
-          )}
+        <div className="grid grid-cols-7">
+          {Array.from({ length: firstDow }, (_, i) => renderDot(null, `e${i}`))}
+          {Array.from({ length: lastDate }, (_, i) => renderDot(i + 1, `d${i + 1}`))}
         </div>
       )}
     </div>
@@ -303,32 +318,36 @@ function CalendarSection({
 function TopicCardItem({
   card,
   index,
+  loading,
   dimmed,
   onClick,
 }: {
   card: TopicCard
   index: number
+  loading: boolean
   dimmed: boolean
   onClick: () => void
 }) {
   return (
     <button
       onClick={onClick}
-      disabled={dimmed}
+      disabled={dimmed || loading}
       className="w-full text-left rounded-2xl border border-zinc-100 bg-white px-5 py-4
         hover:border-zinc-300 hover:shadow-sm active:scale-[0.99]
-        transition-all duration-200 disabled:opacity-40 relative"
+        transition-all duration-200 disabled:opacity-60 relative"
       style={{ animationDelay: `${index * 80}ms` }}
     >
       <p className="text-[9px] text-zinc-400 uppercase tracking-widest mb-2">
         {card.category}
       </p>
-      <p className="text-[14px] font-medium text-zinc-900 leading-snug mb-3">
+      <p className="text-[14px] font-medium text-zinc-900 leading-snug">
         {card.content}
       </p>
-      <p className="text-[12px] text-zinc-400 italic leading-relaxed border-t border-zinc-100 pt-3">
-        {card.firstSentence}
-      </p>
+      {loading ? (
+        <p className="text-[11px] text-zinc-300 mt-3 border-t border-zinc-100 pt-3">
+          첫 문장 생성 중...
+        </p>
+      ) : null}
       <span className="absolute right-4 bottom-3 text-[10px] text-zinc-300">→</span>
     </button>
   )
@@ -348,15 +367,9 @@ function EmptyTopics() {
 
 // ── 사이드바 아이템 ───────────────────────────────────────────
 function SidebarItem({
-  label,
-  active,
-  small,
-  onClick,
+  label, active, small, onClick,
 }: {
-  label: string
-  active?: boolean
-  small?: boolean
-  onClick?: () => void
+  label: string; active?: boolean; small?: boolean; onClick?: () => void
 }) {
   return (
     <button
@@ -378,13 +391,8 @@ function SidebarItem({
 function RefreshIcon({ spinning }: { spinning: boolean }) {
   return (
     <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
+      width="11" height="11" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
       className={spinning ? 'animate-spin' : ''}
     >
       <path d="M3 12a9 9 0 019-9 9.75 9.75 0 016.74 2.74L21 8" />
