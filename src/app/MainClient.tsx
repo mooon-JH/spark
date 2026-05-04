@@ -47,7 +47,7 @@ export default function MainClient({ userId, initialCards, writtenDates }: Props
       return
     }
 
-    // 스트리밍 시작
+    // 첫 문장 요청 (로딩 표시)
     setFirstSentenceState({ topicId: card.id, sentences: [], streaming: true })
 
     try {
@@ -57,27 +57,16 @@ export default function MainClient({ userId, initialCards, writtenDates }: Props
         body: JSON.stringify({ topicContent: card.content }),
       })
 
-      const reader = res.body?.getReader()
-      if (!reader) return
-
-      let accumulated = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        accumulated += new TextDecoder().decode(value)
-      }
-
-      // JSON 파싱
-      const cleaned = accumulated.replace(/```json|```/g, '').trim()
-      const sentences: string[] = JSON.parse(cleaned)
+      const text = await res.text()
+      const sentences: string[] = JSON.parse(text)
 
       setFirstSentenceState({ topicId: card.id, sentences, streaming: false })
 
-      // 첫 번째 문장으로 바로 에디터 진입
       router.push(
         `/editor?topicId=${card.id}&firstSentence=${encodeURIComponent(sentences[0] ?? '')}`
       )
-    } catch {
+    } catch (e) {
+      console.error('first-sentences 실패:', e)
       setFirstSentenceState(null)
       router.push(`/editor?topicId=${card.id}&firstSentence=`)
     }

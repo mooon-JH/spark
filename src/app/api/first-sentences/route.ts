@@ -9,8 +9,7 @@ export async function POST(request: Request) {
     return new Response('topicContent required', { status: 400 })
   }
 
-  // 비유: 유저가 글감을 고른 순간 Claude가 타이핑하듯 첫 문장을 써내려가는 것
-  const stream = await anthropic.messages.stream({
+  const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 256,
     messages: [
@@ -47,25 +46,10 @@ JSON 배열로만 출력. 설명·번호·마크다운 없이.
     ],
   })
 
-  // ReadableStream으로 변환해서 클라이언트에 스트리밍
-  const readable = new ReadableStream({
-    async start(controller) {
-      for await (const chunk of stream) {
-        if (
-          chunk.type === 'content_block_delta' &&
-          chunk.delta.type === 'text_delta'
-        ) {
-          controller.enqueue(new TextEncoder().encode(chunk.delta.text))
-        }
-      }
-      controller.close()
-    },
-  })
+  const text = response.content[0].type === 'text' ? response.content[0].text : ''
+  const cleaned = text.replace(/```json|```/g, '').trim()
 
-  return new Response(readable, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Transfer-Encoding': 'chunked',
-    },
+  return new Response(cleaned, {
+    headers: { 'Content-Type': 'application/json' },
   })
 }
