@@ -1,16 +1,26 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { fetchTopicCards, fetchWrittenDates } from './actions/main'
+import MainClient from './MainClient'
 
-export default async function Home() {
+export default async function HomePage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
   if (!user) redirect('/login')
 
+  const [cards, writtenDates] = await Promise.all([
+    fetchTopicCards(user.id),
+    fetchWrittenDates(user.id),
+  ])
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center">
-      <h1 className="text-2xl font-bold">Spark</h1>
-      <p className="mt-4">안녕하세요, {user.email}</p>
-    </main>
+    <MainClient
+      userId={user.id}
+      initialCards={cards}
+      writtenDates={writtenDates}
+    />
   )
 }
