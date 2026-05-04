@@ -1,6 +1,6 @@
 # ✦ Spark — MVP 기획안
 
-> 버전 2.2 | 2025년  
+> 버전 2.3 | 2025년  
 > Co-writing 글쓰기 앱 | "생각에 불을 붙이는 글쓰기"
 
 ---
@@ -171,12 +171,12 @@
 - auth/callback 리다이렉트 (`route.ts`)
 - Vercel 배포 완료 (spark-theta-one.vercel.app)
 - user_categories 마이그레이션 (click_order, is_removed, selected_at)
+- middleware.ts (비로그인 / 온보딩 미완료 사용자 접근 제어)
 
 ### 🔧 다음 단계 (순서)
-1. **middleware.ts** — 온보딩 미완료 사용자 접근 제어
-2. **메인 화면** — 선택 카테고리 기반 글감 카드 3개 추천
-3. **에디터** — 글감 + 첫 문장 → 글쓰기 → 자동 저장
-4. **아카이브** — 글 목록 / 수정 / 삭제
+1. **메인 화면** — 선택 카테고리 기반 글감 카드 3개 추천
+2. **에디터** — 글감 + 첫 문장 → 글쓰기 → 자동 저장
+3. **아카이브** — 글 목록 / 수정 / 삭제
 
 ---
 
@@ -193,6 +193,8 @@ src/
 └── lib/supabase/
     ├── client.ts
     └── server.ts
+
+middleware.ts
 
 scripts/
 └── generate-topics.mjs
@@ -211,3 +213,4 @@ docs/
 | v2.0 | 타겟 구체화, 카테고리 재편 (10개), 글감 설계 원칙 정의 |
 | v2.1 | 카테고리 10개→16개, 프롬프트 16개 개별 설계 방향 |
 | v2.2 | 온보딩 UX 확정, Fisher-Yates 셔플, user_categories 컬럼 추가, Vercel 배포 완료, 카테고리 핵심 질문 추가, 기획 진화 흐름 추가, 프롬프트 원칙 추가 |
+| v2.3 | middleware.ts 추가 (접근 제어 완료), 폴더 구조 업데이트 |
