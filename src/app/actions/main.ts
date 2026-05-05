@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/server'
 export type TopicCard = {
   id: string
   content: string
-  firstSentence: string
   category: string
 }
 
@@ -18,8 +17,12 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
-// 글감 3개 뽑기
-export async function fetchTopicCards(userId: string): Promise<TopicCard[]> {
+// 글감 N개 뽑기 (가로 슬라이드용 — 초기 로드 및 추가 로드 공용)
+// 비유: 카드 덱에서 아직 안 본 카드를 셔플해서 꺼내는 것
+export async function fetchTopicCards(
+  userId: string,
+  count: number = 10
+): Promise<TopicCard[]> {
   const supabase = await createClient()
 
   const { data: userCats } = await supabase
@@ -38,35 +41,42 @@ export async function fetchTopicCards(userId: string): Promise<TopicCard[]> {
   const seenIds = new Set(seen?.map((s) => s.topic_id) ?? [])
   const categories = shuffle(userCats.map((c) => c.category))
   const cards: TopicCard[] = []
-  const used = new Set<string>()
+  const usedInRound = new Set<string>()
 
-  for (const category of categories) {
-    if (cards.length >= 3) break
-    if (used.has(category)) continue
+  // 라운드 로빈 방식으로 카테고리 순환하며 count개 채우기
+  let rounds = 0
+  while (cards.length < count && rounds < count * 2) {
+    rounds++
+    for (const category of categories) {
+      if (cards.length >= count) break
 
-    const { data: topicIds } = await supabase
-      .from('topic_categories')
-      .select('topic_id')
-      .eq('category', category)
+      const { data: topicIds } = await supabase
+        .from('topic_categories')
+        .select('topic_id')
+        .eq('category', category)
 
-    if (!topicIds?.length) continue
+      if (!topicIds?.length) continue
 
-    const available = topicIds.map((t) => t.topic_id).filter((id) => !seenIds.has(id))
-    if (!available.length) continue
+      const available = topicIds
+        .map((t) => t.topic_id)
+        .filter((id) => !seenIds.has(id) && !usedInRound.has(id))
 
-    const randomId = available[Math.floor(Math.random() * available.length)]
+      if (!available.length) continue
 
-    const { data: topic } = await supabase
-      .from('topics')
-      .select('id, content')
-      .eq('id', randomId)
-      .single()
+      const randomId = available[Math.floor(Math.random() * available.length)]
 
-    if (!topic) continue
+      const { data: topic } = await supabase
+        .from('topics')
+        .select('id, content')
+        .eq('id', randomId)
+        .single()
 
-    // 첫 문장은 카드 클릭 시 /api/first-sentences에서 실시간 스트리밍 생성
-    cards.push({ id: topic.id, content: topic.content, firstSentence: '', category })
-    used.add(category)
+      if (!topic) continue
+
+      cards.push({ id: topic.id, content: topic.content, category })
+      usedInRound.add(randomId)
+    }
+    if (cards.length < count) usedInRound.clear()
   }
 
   return cards
@@ -78,7 +88,14 @@ export async function fetchWrittenDates(userId: string): Promise<string[]> {
 
   const now = new Date()
   const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString()
+  const lastDay = new Date(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    0,
+    23,
+    59,
+    59
+  ).toISOString()
 
   const { data } = await supabase
     .from('writings')
