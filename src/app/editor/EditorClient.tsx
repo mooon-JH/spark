@@ -32,6 +32,7 @@ export default function EditorClient({
   const [body, setBody]                 = useState(draft?.body ?? '')
   const [saveStatus, setSaveStatus]     = useState<SaveStatus>('idle')
   const [isEditingTopic, setIsEditingTopic] = useState(false)
+  const [showAutoSaveTip, setShowAutoSaveTip] = useState(!draft?.body)
 
   // ── 이어쓰기 상태 ────────────────────────────────────────────
   const [suggestion, setSuggestion]     = useState<string>('')
@@ -95,6 +96,13 @@ export default function EditorClient({
       if (bodyRef.current.trim()) triggerSave()
     }
   }, [triggerSave])
+
+  // 자동저장 안내 3초 후 자동 소멸
+  useEffect(() => {
+    if (!showAutoSaveTip) return
+    const t = setTimeout(() => setShowAutoSaveTip(false), 3000)
+    return () => clearTimeout(t)
+  }, [showAutoSaveTip])
 
   // textarea 높이 자동 조절
   useEffect(() => {
@@ -252,6 +260,13 @@ export default function EditorClient({
         </button>
         <SaveIndicator status={saveStatus} />
       </header>
+
+      {/* 자동저장 안내 — 새 글 첫 진입 시 3초 노출 */}
+      {showAutoSaveTip && (
+        <div className="px-5 pt-3">
+          <p className="text-[12px] text-zinc-400 text-center">자동으로 저장돼요.</p>
+        </div>
+      )}
 
       {/* 스크롤 영역 */}
       <div className="flex-1 overflow-y-auto" ref={bodyContainerRef}>
