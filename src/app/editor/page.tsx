@@ -7,30 +7,45 @@ import { Suspense } from 'react'
 type SearchParams = Promise<{
   topicId?: string
   free?: string
+  from?: string      // 'archive'면 아카이브로 복귀
+  writingId?: string // 기존 글 수정 시
 }>
 
-// 데이터 로딩 — 병렬로 처리
 async function EditorData({
   topicId,
   isFree,
   userId,
+  returnTo,
+  existingWritingId,
 }: {
   topicId: string | null
   isFree: boolean
   userId: string
+  returnTo: 'home' | 'archive'
+  existingWritingId: string | null
 }) {
   const supabase = await createClient()
 
-  // topics 조회 + draft 조회를 병렬로
   const [topicResult, draft] = await Promise.all([
     topicId
       ? supabase.from('topics').select('content').eq('id', topicId).single()
       : Promise.resolve({ data: null }),
-    getDraft({ userId, topicId }),
+    // 기존 글 수정이면 writingId로 조회, 아니면 topicId로 draft 조회
+    existingWritingId
+      ? supabase
+          .from('writings')
+          .select('id, topic_id, topic_content, body')
+          .eq('id', existingWritingId)
+          .eq('user_id', userId)
+          .single()
+          .then((r) => r.data ?? null)
+      : getDraft({ userId, topicId }),
   ])
 
   const topicContent =
-    draft?.topic_content ?? topicResult.data?.content ?? ''
+    (draft as { topic_content?: string } | null)?.topic_content ??
+    topicResult.data?.content ??
+    ''
 
   return (
     <EditorClient
@@ -38,7 +53,8 @@ async function EditorData({
       topicId={topicId}
       topicContent={topicContent}
       isFree={isFree}
-      draft={draft}
+      draft={draft as Parameters<typeof EditorClient>[0]['draft']}
+      returnTo={returnTo}
     />
   )
 }
@@ -55,47 +71,40 @@ export default async function EditorPage({
 
   if (!user) redirect('/login')
 
-  const { topicId, free } = await searchParams
+  const { topicId, free, from, writingId } = await searchParams
   const isFree = free === 'true'
+  const returnTo: 'home' | 'archive' = from === 'archive' ? 'archive' : 'home'
 
-  if (!isFree && !topicId) redirect('/')
+  if (!isFree && !topicId && !writingId) redirect('/')
 
   return (
-    // Suspense로 감싸서 데이터 로딩 중에도 즉시 렌더링
-    // 비유: 빈 그릇 먼저 테이블에 올리고, 음식은 바로 뒤따라 나오는 것
     <Suspense fallback={<EditorSkeleton />}>
       <EditorData
         topicId={topicId ?? null}
         isFree={isFree}
         userId={user.id}
+        returnTo={returnTo}
+        existingWritingId={writingId ?? null}
       />
     </Suspense>
   )
 }
 
-// 로딩 중 스켈레톤 — 에디터 레이아웃과 동일한 구조
 function EditorSkeleton() {
   return (
     <div
       className="min-h-screen bg-white flex flex-col"
-      style={{ paddingTop: '59px', paddingBottom: '34px', maxWidth: '390px', margin: '0 auto' }}
+      style={{ maxWidth: '390px', margin: '0 auto' }}
     >
-      {/* 헤더 */}
-      <header className="px-5 pt-6 pb-4 flex items-center justify-between border-b border-zinc-50">
+      <header className="px-5 pt-12 pb-4 flex items-center justify-between border-b border-zinc-50">
         <div className="w-6 h-4 bg-zinc-100 rounded animate-pulse" />
         <div className="w-16 h-3 bg-zinc-100 rounded animate-pulse" />
       </header>
-
-      {/* 글감 스켈레톤 */}
       <div className="px-5 mt-6 mb-5 space-y-2">
         <div className="w-3/4 h-5 bg-zinc-100 rounded animate-pulse" />
         <div className="w-1/2 h-5 bg-zinc-100 rounded animate-pulse" />
       </div>
-
-      <div className="mx-5 border-t border-zinc-100 mb-5" />
-
-      {/* 입력창 스켈레톤 */}
-      <div className="px-5 space-y-3">
+      <div className="px-5 space-y-3 mt-4">
         <div className="w-full h-4 bg-zinc-50 rounded animate-pulse" />
         <div className="w-4/5 h-4 bg-zinc-50 rounded animate-pulse" />
         <div className="w-3/5 h-4 bg-zinc-50 rounded animate-pulse" />
