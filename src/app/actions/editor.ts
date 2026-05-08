@@ -6,25 +6,21 @@ export type WritingDraft = {
   id: string
   topic_id: string | null
   topic_content: string
-  first_sentence: string
   body: string
 }
 
 // 글 저장 (upsert)
-// 비유: writingId 있으면 기존 문서 덮어쓰기, 없으면 새 문서 생성
 export async function saveWriting({
   writingId,
   userId,
   topicId,
   topicContent,
-  firstSentence,
   body,
 }: {
   writingId: string | null
   userId: string
   topicId: string | null
   topicContent: string
-  firstSentence: string
   body: string
 }): Promise<{ id: string } | { error: string }> {
   const supabase = await createClient()
@@ -50,7 +46,6 @@ export async function saveWriting({
       user_id: userId,
       topic_id: topicId,
       topic_content: topicContent,
-      first_sentence: firstSentence,
       body,
     })
     .select('id')
@@ -71,7 +66,7 @@ export async function saveWriting({
   return { id: data.id }
 }
 
-// 동일 topic_id로 작성 중인 임시저장 글 조회
+// 임시저장 글 조회
 export async function getDraft({
   userId,
   topicId,
@@ -83,7 +78,7 @@ export async function getDraft({
 
   const query = supabase
     .from('writings')
-    .select('id, topic_id, topic_content, first_sentence, body')
+    .select('id, topic_id, topic_content, body')
     .eq('user_id', userId)
     .order('updated_at', { ascending: false })
     .limit(1)

@@ -9,7 +9,6 @@ type Props = {
   userId: string
   topicId: string | null
   topicContent: string
-  firstSentence: string
   isFree: boolean
   draft: WritingDraft | null
 }
@@ -20,34 +19,31 @@ export default function EditorClient({
   userId,
   topicId,
   topicContent: initialTopicContent,
-  firstSentence,
   isFree,
   draft,
 }: Props) {
   const router = useRouter()
 
-  const [writingId, setWritingId] = useState<string | null>(draft?.id ?? null)
-  const [topicContent, setTopicContent] = useState(
-    draft?.topic_content ?? initialTopicContent
-  )
-  const [body, setBody] = useState(draft?.body ?? '')
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
+  const [writingId, setWritingId]       = useState<string | null>(draft?.id ?? null)
+  const [topicContent, setTopicContent] = useState(draft?.topic_content ?? initialTopicContent)
+  const [body, setBody]                 = useState(draft?.body ?? '')
+  const [saveStatus, setSaveStatus]     = useState<SaveStatus>('idle')
   const [isEditingTopic, setIsEditingTopic] = useState(false)
   const [showRestoreBanner, setShowRestoreBanner] = useState(
     !!draft?.body && draft.body.length > 0
   )
 
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const writingIdRef = useRef<string | null>(writingId)
-  const bodyRef = useRef(body)
-  const topicRef = useRef(topicContent)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const debounceTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const writingIdRef   = useRef<string | null>(writingId)
+  const bodyRef        = useRef(body)
+  const topicRef       = useRef(topicContent)
+  const textareaRef    = useRef<HTMLTextAreaElement | null>(null)
 
-  useEffect(() => { writingIdRef.current = writingId }, [writingId])
-  useEffect(() => { bodyRef.current = body }, [body])
-  useEffect(() => { topicRef.current = topicContent }, [topicContent])
+  useEffect(() => { writingIdRef.current = writingId },   [writingId])
+  useEffect(() => { bodyRef.current = body },             [body])
+  useEffect(() => { topicRef.current = topicContent },    [topicContent])
 
-  // 자동 저장
+  // 자동 저장 (1.5초 디바운스)
   const triggerSave = useCallback(async () => {
     if (!bodyRef.current.trim()) return
     setSaveStatus('saving')
@@ -57,7 +53,6 @@ export default function EditorClient({
       userId,
       topicId,
       topicContent: topicRef.current,
-      firstSentence,
       body: bodyRef.current,
     })
 
@@ -68,9 +63,8 @@ export default function EditorClient({
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2000)
     }
-  }, [userId, topicId, firstSentence])
+  }, [userId, topicId])
 
-  // 디바운스: 타이핑 멈추고 1.5초 후 저장
   const scheduleAutosave = useCallback(() => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current)
     debounceTimer.current = setTimeout(triggerSave, 1500)
@@ -134,10 +128,10 @@ export default function EditorClient({
         </div>
       )}
 
-      {/* 글감 / 자유 주제 헤더 */}
+      {/* 글감 */}
       <div className="px-5 mt-6 mb-5">
         {isFree ? (
-          <p className="text-[13px] text-zinc-400">자유 주제</p>
+          <p className="text-[14px] text-zinc-400">자유 주제</p>
         ) : isEditingTopic ? (
           <textarea
             autoFocus
@@ -151,7 +145,7 @@ export default function EditorClient({
           />
         ) : (
           <button onClick={() => setIsEditingTopic(true)} className="w-full text-left">
-            <p className="text-[15px] font-medium text-zinc-800 leading-relaxed">
+            <p className="text-[15px] font-medium text-zinc-800 leading-snug">
               {topicContent}
             </p>
             <span className="text-[11px] text-zinc-300 mt-1 block">탭하여 글감 수정</span>
@@ -162,15 +156,6 @@ export default function EditorClient({
       {/* 구분선 */}
       <div className="mx-5 border-t border-zinc-100 mb-5" />
 
-      {/* 첫 문장 */}
-      {firstSentence && !isFree && (
-        <div className="px-5 mb-4">
-          <p className="text-[14px] text-zinc-400 leading-relaxed italic">
-            {firstSentence}
-          </p>
-        </div>
-      )}
-
       {/* 본문 */}
       <div className="px-5 flex-1">
         <textarea
@@ -180,7 +165,7 @@ export default function EditorClient({
             setBody(e.target.value)
             scheduleAutosave()
           }}
-          placeholder={isFree ? '자유롭게 써내려가세요...' : '여기서부터 써내려가세요...'}
+          placeholder="떠오르는 장면부터 써봐요."
           className="w-full text-[15px] text-zinc-800 leading-[1.8] placeholder:text-zinc-300
             bg-transparent resize-none outline-none min-h-[50vh]"
           style={{ fontFamily: 'var(--font-geist-sans)' }}
@@ -218,15 +203,9 @@ function SaveIndicator({ status }: { status: SaveStatus }) {
 
 // ── 서식 버튼 ─────────────────────────────────────────────────
 function FormatButton({
-  label,
-  bold,
-  italic,
-  onClick,
+  label, bold, italic, onClick,
 }: {
-  label: string
-  bold?: boolean
-  italic?: boolean
-  onClick: () => void
+  label: string; bold?: boolean; italic?: boolean; onClick: () => void
 }) {
   return (
     <button
@@ -251,26 +230,24 @@ function insertFormat(
   if (!el) return
 
   const start = el.selectionStart
-  const end = el.selectionEnd
-  const current = el.value
-
+  const end   = el.selectionEnd
+  const cur   = el.value
   let next: string
-  let newCursor: number
+  let cursor: number
 
   if (start !== end) {
-    const selected = current.slice(start, end)
-    next = current.slice(0, start) + marker + selected + marker + current.slice(end)
-    newCursor = end + marker.length * 2
+    const sel = cur.slice(start, end)
+    next   = cur.slice(0, start) + marker + sel + marker + cur.slice(end)
+    cursor = end + marker.length * 2
   } else {
-    next = current.slice(0, start) + marker + marker + current.slice(start)
-    newCursor = start + marker.length
+    next   = cur.slice(0, start) + marker + marker + cur.slice(start)
+    cursor = start + marker.length
   }
 
   setBody(next)
   scheduleAutosave()
-
   requestAnimationFrame(() => {
     el.focus()
-    el.setSelectionRange(newCursor, newCursor)
+    el.setSelectionRange(cursor, cursor)
   })
 }

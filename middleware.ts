@@ -45,35 +45,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // 2. 로그인 상태에서 온보딩 완료 여부 확인
-  if (user && !isPublicPath && pathname !== "/onboarding") {
-    const { data: userData } = await supabase
-      .from("users")
-      .select("onboarding_completed")
-      .eq("id", user.id)
-      .single();
-
-    // 온보딩 미완료 → /onboarding으로
-    if (!userData?.onboarding_completed) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/onboarding";
-      return NextResponse.redirect(url);
-    }
-  }
-
-  // 3. 이미 로그인 + 온보딩 완료인데 /login 또는 /onboarding 접근 시 → 홈으로
-  if (user && (pathname === "/login" || pathname === "/onboarding")) {
-    const { data: userData } = await supabase
-      .from("users")
-      .select("onboarding_completed")
-      .eq("id", user.id)
-      .single();
-
-    if (userData?.onboarding_completed) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/";
-      return NextResponse.redirect(url);
-    }
+  // 2. 로그인 상태에서 /login 접근 시 → 홈으로
+  if (user && pathname === "/login") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    return NextResponse.redirect(url);
   }
 
   return supabaseResponse;
@@ -81,12 +57,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * 아래 경로는 미들웨어에서 제외:
-     * - _next/static (정적 파일)
-     * - _next/image (이미지 최적화)
-     * - favicon.ico, 이미지 파일 등
-     */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

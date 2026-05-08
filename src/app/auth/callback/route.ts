@@ -10,37 +10,42 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
 
     if (!error) {
-      // 로그인한 사용자 정보 가져오기
       const { data: { user } } = await supabase.auth.getUser()
 
       if (user) {
-        // users 테이블에 온보딩 완료 여부 확인
         const { data: profile } = await supabase
           .from('users')
-          .select('onboarding_completed')
+          .select('id')
           .eq('id', user.id)
           .single()
 
-        // 신규 유저면 users 테이블에 row 생성
+        // Google 프로필에서 닉네임 추출
+        const nickname =
+          user.user_metadata?.full_name ??
+          user.user_metadata?.name ??
+          user.email?.split('@')[0] ??
+          '익명'
+
         if (!profile) {
+          // 신규 유저 — row 생성 + 닉네임 저장
           await supabase.from('users').insert({
             id: user.id,
             email: user.email,
-            onboarding_completed: false,
+            nickname,
           })
-          return NextResponse.redirect(`${origin}/onboarding`)
+        } else {
+          // 기존 유저 — 닉네임이 없을 경우에만 업데이트
+          await supabase
+            .from('users')
+            .update({ nickname })
+            .eq('id', user.id)
+            .is('nickname', null)
         }
 
-        // 온보딩 완료 여부에 따라 분기
-        if (profile.onboarding_completed) {
-          return NextResponse.redirect(`${origin}/`)
-        } else {
-          return NextResponse.redirect(`${origin}/onboarding`)
-        }
+        return NextResponse.redirect(`${origin}/`)
       }
     }
   }
 
-  // 에러 시 로그인 페이지로
   return NextResponse.redirect(`${origin}/login`)
 }
