@@ -310,7 +310,10 @@ export default function EditorClient({
             }}
             placeholder="떠오르는 장면부터 써봐요..."
             className="w-full text-[15px] text-zinc-700 leading-[1.8] resize-none focus:outline-none bg-transparent"
-            style={{ minHeight: '60vh' }}
+            style={{ 
+              minHeight: '60vh',
+              paddingBottom: '60px', // 서식 툴바 공간 확보
+            }}
           />
 
           {showAutoSaveTip && (
@@ -394,6 +397,8 @@ export default function EditorClient({
               className="cursor-pointer px-1 rounded transition-shadow"
               style={{
                 display: 'inline',
+                fontSize: '15px',
+                lineHeight: '1.8',
                 backgroundColor: isPositive ? '#dcfce7' : '#fef9c3',
                 color: isPositive ? '#166534' : '#713f12',
                 boxDecorationBreak: 'clone',
