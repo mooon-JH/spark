@@ -66,7 +66,7 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
     }
   }
 
-  const handleFreeWrite = () => router.push('/editor?free=true')
+  const handleFreeWrite = () => router.push('/editor?free=true&newFree=true')
   const handleArchive = () => router.push('/archive')
 
   if (exhausted) return <ExhaustedView onFreeWrite={handleFreeWrite} />

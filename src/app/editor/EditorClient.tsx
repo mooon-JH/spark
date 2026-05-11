@@ -72,6 +72,7 @@ export default function EditorClient({
   const [feedbackData, setFeedbackData] = useState<FeedbackData | null>(null)
   const [feedbackError, setFeedbackError] = useState(false)
   const [selectedHighlightIdx, setSelectedHighlightIdx] = useState<number | null>(null)
+  const [editingHighlightIdx, setEditingHighlightIdx] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
 
   // ── refs ────────────────────────────────────────────────────
@@ -80,7 +81,6 @@ export default function EditorClient({
   const bodyRef = useRef(body)
   const topicRef = useRef(topicContent)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const editableRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => { writingIdRef.current = writingId }, [writingId])
   useEffect(() => { bodyRef.current = body }, [body])
@@ -215,6 +215,7 @@ export default function EditorClient({
     setFeedbackData(null)
     setFeedbackError(false)
     setSelectedHighlightIdx(null)
+    setEditingHighlightIdx(null)
 
     try {
       const res = await fetch('/api/feedback', {
@@ -239,31 +240,41 @@ export default function EditorClient({
     setFeedbackMode('off')
     setFeedbackData(null)
     setSelectedHighlightIdx(null)
+    setEditingHighlightIdx(null)
   }
 
   const handleHighlightClick = (idx: number) => {
     if (selectedHighlightIdx === idx) {
       setSelectedHighlightIdx(null)
+      setEditingHighlightIdx(null)
       setEditText('')
     } else {
       setSelectedHighlightIdx(idx)
+      setEditingHighlightIdx(null)
       const hl = feedbackData?.highlights[idx]
       setEditText(hl?.text ?? '')
     }
   }
 
+  const handleStartEdit = (idx: number) => {
+    const hl = feedbackData?.highlights[idx]
+    setEditingHighlightIdx(idx)
+    setEditText(hl?.text ?? '')
+  }
+
   const handleApplyEdit = () => {
-    if (selectedHighlightIdx === null || !feedbackData) return
-    const hl = feedbackData.highlights[selectedHighlightIdx]
+    if (editingHighlightIdx === null || !feedbackData) return
+    const hl = feedbackData.highlights[editingHighlightIdx]
     const newBody = body.replace(hl.text, editText)
     setBody(newBody)
     bodyRef.current = newBody
     scheduleAutosave()
 
     const updatedHighlights = [...feedbackData.highlights]
-    updatedHighlights[selectedHighlightIdx] = { ...hl, text: editText }
+    updatedHighlights[editingHighlightIdx] = { ...hl, text: editText }
     setFeedbackData({ ...feedbackData, highlights: updatedHighlights })
 
+    setEditingHighlightIdx(null)
     setSelectedHighlightIdx(null)
     setEditText('')
   }
@@ -284,7 +295,6 @@ export default function EditorClient({
   // ── 하이라이트된 원문 렌더링 ─────────────────────────────────
   const renderBody = () => {
     if (feedbackMode === 'off') {
-      // 일반 모드 — textarea
       return (
         <>
           <textarea
@@ -314,20 +324,20 @@ export default function EditorClient({
                 <div className="flex gap-1 shrink-0">
                   <button
                     onClick={handleAccept}
-                    className="w-6 h-6 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-xs font-bold"
+                    className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-sm font-bold"
                   >
                     ✓
                   </button>
                   <button
                     onClick={handleReject}
-                    className="w-6 h-6 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-xs font-bold"
+                    className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-sm font-bold"
                   >
                     ×
                   </button>
                 </div>
               </div>
               {showTooltip && (
-                <div className="absolute -top-8 left-0 bg-zinc-900 text-white text-[11px] px-2 py-1 rounded whitespace-nowrap">
+                <div className="absolute -top-10 left-0 bg-zinc-900 text-white text-[11px] px-3 py-2 rounded-lg whitespace-nowrap shadow-lg">
                   ✓ 수락 · × 거절
                 </div>
               )}
@@ -337,10 +347,9 @@ export default function EditorClient({
       )
     }
 
-    // 피드백 모드 — 하이라이트 + 인라인 상세
+    // 피드백 모드
     if (!feedbackData) return null
 
-    // 원문을 줄 단위로 나눔
     const lines = body.split('\n')
     const result: JSX.Element[] = []
 
@@ -350,20 +359,17 @@ export default function EditorClient({
         return
       }
 
-      // 이 줄에 있는 하이라이트 찾기
       const lineHighlights = feedbackData.highlights
         .map((hl, hlIdx) => ({ ...hl, hlIdx }))
         .filter((hl) => line.includes(hl.text))
 
       if (lineHighlights.length === 0) {
-        // 하이라이트 없음
         result.push(
           <div key={`line-${lineIdx}`} className="text-[15px] text-zinc-700 leading-[1.8]">
             {line}
           </div>
         )
       } else {
-        // 하이라이트 있음 — 분할해서 렌더링
         let remaining = line
         const segments: JSX.Element[] = []
 
@@ -371,7 +377,6 @@ export default function EditorClient({
           const pos = remaining.indexOf(hl.text)
           if (pos === -1) return
 
-          // 앞부분 텍스트
           if (pos > 0) {
             segments.push(
               <span key={`before-${idx}`} className="text-zinc-700">
@@ -380,17 +385,19 @@ export default function EditorClient({
             )
           }
 
-          // 하이라이트
           const isPositive = hl.type === 'positive'
           const isSelected = selectedHighlightIdx === hl.hlIdx
           segments.push(
             <span
               key={`hl-${hl.hlIdx}`}
               onClick={() => handleHighlightClick(hl.hlIdx)}
-              className="cursor-pointer inline-block px-1 rounded transition-shadow"
+              className="cursor-pointer px-1 rounded transition-shadow"
               style={{
+                display: 'inline',
                 backgroundColor: isPositive ? '#dcfce7' : '#fef9c3',
                 color: isPositive ? '#166534' : '#713f12',
+                boxDecorationBreak: 'clone',
+                WebkitBoxDecorationBreak: 'clone',
                 boxShadow: isSelected
                   ? `0 0 0 2px ${isPositive ? '#166534' : '#713f12'}`
                   : 'none',
@@ -404,7 +411,6 @@ export default function EditorClient({
           remaining = remaining.slice(pos + hl.text.length)
         })
 
-        // 나머지 텍스트
         if (remaining) {
           segments.push(
             <span key="after" className="text-zinc-700">
@@ -419,16 +425,17 @@ export default function EditorClient({
           </div>
         )
 
-        // 선택된 하이라이트의 상세 정보 (해당 줄 바로 아래)
+        // 선택된 하이라이트 상세
         lineHighlights.forEach((hl) => {
           if (selectedHighlightIdx === hl.hlIdx) {
             const isPositive = hl.type === 'positive'
+            const isEditing = editingHighlightIdx === hl.hlIdx
+            
             result.push(
               <div
                 key={`detail-${hl.hlIdx}`}
                 className="mt-2 mb-4 flex flex-col gap-2 animate-slideDown"
               >
-                {/* 이유 */}
                 <div className="bg-zinc-50 border-l-2 border-zinc-400 px-3 py-2 rounded-r-lg">
                   <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide mb-1">
                     이유
@@ -436,7 +443,6 @@ export default function EditorClient({
                   <p className="text-xs text-zinc-700 leading-relaxed">{hl.reason}</p>
                 </div>
 
-                {/* 예시 (negative만) */}
                 {!isPositive && hl.example && (
                   <div className="bg-amber-50 border-l-2 border-amber-400 px-3 py-2 rounded-r-lg">
                     <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">
@@ -448,23 +454,34 @@ export default function EditorClient({
                   </div>
                 )}
 
-                {/* 수정창 (negative만) */}
                 {!isPositive && (
-                  <div className="flex flex-col gap-2 bg-white border border-zinc-200 rounded-lg p-3">
-                    <input
-                      type="text"
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                      placeholder="수정할 문장을 입력하세요"
-                      className="w-full text-sm text-zinc-900 bg-transparent border-b border-zinc-200 pb-1 focus:outline-none focus:border-zinc-900"
-                    />
-                    <button
-                      onClick={handleApplyEdit}
-                      className="self-end px-3 py-1.5 bg-zinc-900 text-white text-xs rounded-lg hover:bg-zinc-700"
-                    >
-                      반영
-                    </button>
-                  </div>
+                  <>
+                    {!isEditing ? (
+                      <button
+                        onClick={() => handleStartEdit(hl.hlIdx)}
+                        className="self-start min-h-[44px] px-4 py-2 text-sm text-zinc-700 border border-zinc-300 rounded-lg hover:bg-zinc-50 transition-colors"
+                      >
+                        수정하기
+                      </button>
+                    ) : (
+                      <div className="flex flex-col gap-2 bg-white border border-zinc-200 rounded-lg p-3">
+                        <input
+                          type="text"
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          placeholder="수정할 문장을 입력하세요"
+                          autoFocus
+                          className="w-full text-sm text-zinc-900 bg-transparent border-b border-zinc-200 pb-2 focus:outline-none focus:border-zinc-900"
+                        />
+                        <button
+                          onClick={handleApplyEdit}
+                          className="self-end min-h-[44px] px-4 py-2 bg-zinc-900 text-white text-sm rounded-lg hover:bg-zinc-700 transition-colors"
+                        >
+                          반영
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )
@@ -486,15 +503,14 @@ export default function EditorClient({
         mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
       }`}
     >
-      {/* 헤더 */}
       <header
         className={`sticky top-0 z-20 ${headerBg} transition-colors duration-300`}
-        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}
       >
-        <div className="max-w-[390px] mx-auto px-4 h-14 flex items-center justify-between">
+        <div className="w-full px-4 h-14 flex items-center justify-between">
           <button
             onClick={handleBack}
-            className={`p-2 -ml-2 transition-colors ${
+            className={`p-2 -ml-2 min-w-[44px] min-h-[44px] transition-colors ${
               isInFeedbackMode ? 'text-white' : 'text-zinc-400 hover:text-zinc-900'
             }`}
           >
@@ -518,7 +534,7 @@ export default function EditorClient({
             {feedbackMode === 'result' && (
               <button
                 onClick={handleCloseFeedback}
-                className="px-3 py-1.5 text-xs text-white border border-white/20 rounded-lg hover:bg-white/10"
+                className="min-h-[44px] px-3 py-1.5 text-xs text-white border border-white/20 rounded-lg hover:bg-white/10"
               >
                 종료
               </button>
@@ -529,10 +545,8 @@ export default function EditorClient({
         </div>
       </header>
 
-      {/* 본문 */}
-      <div className="max-w-[390px] mx-auto">
+      <div className="w-full">
         <div className={`min-h-[calc(100vh-3.5rem)] border-x ${containerBorder} transition-colors duration-300 relative`}>
-          {/* 글감 */}
           <div className="px-4 pt-6 pb-6">
             {isEditingTopic || (isFree && !topicContent.trim()) ? (
               <input
@@ -547,14 +561,13 @@ export default function EditorClient({
             ) : (
               <button
                 onClick={() => setIsEditingTopic(true)}
-                className="w-full text-left text-[15px] font-semibold text-zinc-900 hover:text-zinc-600"
+                className="w-full text-left text-[15px] font-semibold text-zinc-900 hover:text-zinc-600 min-h-[44px]"
               >
                 {topicContent}
               </button>
             )}
           </div>
 
-          {/* 피드백 구조 배너 */}
           {feedbackMode === 'result' && feedbackData && (
             <div className="px-4 pb-4">
               <div className="bg-zinc-50 border-l-2 border-zinc-900 px-3 py-2 rounded-r-lg">
@@ -563,7 +576,6 @@ export default function EditorClient({
             </div>
           )}
 
-          {/* 스캔 오버레이 */}
           {feedbackMode === 'scanning' && (
             <div
               className="absolute inset-0 z-10 pointer-events-none"
@@ -576,10 +588,8 @@ export default function EditorClient({
             </div>
           )}
 
-          {/* 본문 영역 */}
           <div className="px-4 pb-20">{renderBody()}</div>
 
-          {/* 다음 시도 */}
           {feedbackMode === 'result' && feedbackData && (
             <div className="px-4 pb-6">
               <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3">
@@ -591,12 +601,11 @@ export default function EditorClient({
             </div>
           )}
 
-          {/* 하단 고정 */}
           <div
             className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-100 z-30"
-            style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+            style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
           >
-            <div className="max-w-[390px] mx-auto px-4 py-3">
+            <div className="w-full px-4 py-3">
               {feedbackMode === 'off' && (
                 <div className="flex items-center justify-between">
                   <div className="flex gap-1">
@@ -606,7 +615,7 @@ export default function EditorClient({
                   <button
                     onClick={handleFeedback}
                     disabled={!canFeedback || feedbackMode !== 'off'}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    className={`min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                       canFeedback && feedbackMode === 'off'
                         ? 'bg-zinc-900 text-white hover:bg-zinc-700'
                         : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
@@ -620,7 +629,7 @@ export default function EditorClient({
               {feedbackError && (
                 <div className="text-center">
                   <p className="text-xs text-zinc-500 mb-2">잠깐 문제가 생겼어요. 다시 시도해볼게요.</p>
-                  <button onClick={handleFeedback} className="text-xs text-zinc-400 underline">
+                  <button onClick={handleFeedback} className="text-xs text-zinc-400 underline min-h-[44px]">
                     다시 시도
                   </button>
                 </div>
@@ -662,7 +671,7 @@ function FormatButton({ label, bold, italic, onClick }: { label: string; bold?: 
   return (
     <button
       onClick={onClick}
-      className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm"
+      className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm"
       style={{ fontWeight: bold ? 700 : 400, fontStyle: italic ? 'italic' : 'normal' }}
     >
       {label}
