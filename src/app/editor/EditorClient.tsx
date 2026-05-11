@@ -63,6 +63,7 @@ export default function EditorClient({
   const [suggestion, setSuggestion] = useState<string>('')
   const [showSuggest, setShowSuggest] = useState(false)
   const [showTooltip, setShowTooltip] = useState(false)
+  const [isFetchingSuggest, setIsFetchingSuggest] = useState(false)
   const tooltipShownRef = useRef(false)
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cooldownRef = useRef(false)
@@ -73,7 +74,6 @@ export default function EditorClient({
   const [feedbackData, setFeedbackData] = useState<FeedbackData | null>(null)
   const [feedbackError, setFeedbackError] = useState(false)
   const [selectedHighlightIdx, setSelectedHighlightIdx] = useState<number | null>(null)
-  const [editingHighlightIdx, setEditingHighlightIdx] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
 
   // ── refs ────────────────────────────────────────────────────
@@ -143,6 +143,9 @@ export default function EditorClient({
     if (cooldownRef.current || isAcceptingRef.current) return
     if (!bodyRef.current.trim()) return
     if (feedbackMode !== 'off') return
+    
+    setIsFetchingSuggest(true)
+    
     try {
       const res = await fetch('/api/suggest', {
         method: 'POST',
@@ -159,7 +162,9 @@ export default function EditorClient({
         setShowTooltip(true)
         setTimeout(() => setShowTooltip(false), 6000)
       }
-    } catch { /* 무시 */ }
+    } catch { /* 무시 */ } finally {
+      setIsFetchingSuggest(false)
+    }
   }, [feedbackMode])
 
   const scheduleSuggestion = useCallback(() => {
@@ -170,6 +175,7 @@ export default function EditorClient({
   const clearSuggestion = useCallback(() => {
     setShowSuggest(false)
     setSuggestion('')
+    setIsFetchingSuggest(false)
     if (suggestTimer.current) clearTimeout(suggestTimer.current)
   }, [])
 
@@ -216,7 +222,6 @@ export default function EditorClient({
     setFeedbackData(null)
     setFeedbackError(false)
     setSelectedHighlightIdx(null)
-    setEditingHighlightIdx(null)
 
     try {
       const res = await fetch('/api/feedback', {
@@ -241,41 +246,31 @@ export default function EditorClient({
     setFeedbackMode('off')
     setFeedbackData(null)
     setSelectedHighlightIdx(null)
-    setEditingHighlightIdx(null)
   }
 
   const handleHighlightClick = (idx: number) => {
     if (selectedHighlightIdx === idx) {
       setSelectedHighlightIdx(null)
-      setEditingHighlightIdx(null)
       setEditText('')
     } else {
       setSelectedHighlightIdx(idx)
-      setEditingHighlightIdx(null)
       const hl = feedbackData?.highlights[idx]
       setEditText(hl?.text ?? '')
     }
   }
 
-  const handleStartEdit = (idx: number) => {
-    const hl = feedbackData?.highlights[idx]
-    setEditingHighlightIdx(idx)
-    setEditText(hl?.text ?? '')
-  }
-
   const handleApplyEdit = () => {
-    if (editingHighlightIdx === null || !feedbackData) return
-    const hl = feedbackData.highlights[editingHighlightIdx]
+    if (selectedHighlightIdx === null || !feedbackData) return
+    const hl = feedbackData.highlights[selectedHighlightIdx]
     const newBody = body.replace(hl.text, editText)
     setBody(newBody)
     bodyRef.current = newBody
     scheduleAutosave()
 
     const updatedHighlights = [...feedbackData.highlights]
-    updatedHighlights[editingHighlightIdx] = { ...hl, text: editText }
+    updatedHighlights[selectedHighlightIdx] = { ...hl, text: editText }
     setFeedbackData({ ...feedbackData, highlights: updatedHighlights })
 
-    setEditingHighlightIdx(null)
     setSelectedHighlightIdx(null)
     setEditText('')
   }
@@ -310,10 +305,11 @@ export default function EditorClient({
               scheduleSuggestion()
             }}
             placeholder="떠오르는 장면부터 써봐요..."
-            className="w-full text-[15px] text-zinc-700 leading-[1.8] resize-none focus:outline-none bg-transparent"
+            className="w-full text-zinc-700 leading-[1.8] resize-none focus:outline-none bg-transparent"
             style={{ 
-              minHeight: '60vh',
-              paddingBottom: '60px', // 서식 툴바 공간 확보
+              fontSize: '16px',
+              minHeight: '50vh',
+              paddingBottom: '80px',
             }}
           />
 
@@ -321,10 +317,22 @@ export default function EditorClient({
             <div className="mt-2 text-xs text-zinc-400">자동으로 저장돼요.</div>
           )}
 
+          {/* 이어쓰기 로딩 */}
+          {isFetchingSuggest && !showSuggest && (
+            <div className="mt-2 flex items-center gap-2 text-zinc-400">
+              <div className="flex gap-1">
+                <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+              <span className="text-xs">다음 문장 제안 중...</span>
+            </div>
+          )}
+
           {showSuggest && (
             <div className="relative mt-2">
               <div className="flex items-start gap-2">
-                <span className="text-[15px] text-zinc-400 leading-[1.8]">{suggestion}</span>
+                <span className="text-zinc-400 leading-[1.8]" style={{ fontSize: '16px' }}>{suggestion}</span>
                 <div className="flex gap-1 shrink-0">
                   <button
                     onClick={handleAccept}
@@ -369,7 +377,7 @@ export default function EditorClient({
 
       if (lineHighlights.length === 0) {
         result.push(
-          <div key={`line-${lineIdx}`} className="text-[15px] text-zinc-700 leading-[1.8]">
+          <div key={`line-${lineIdx}`} className="text-zinc-700 leading-[1.8]" style={{ fontSize: '16px' }}>
             {line}
           </div>
         )
@@ -398,7 +406,7 @@ export default function EditorClient({
               className="cursor-pointer px-1 rounded transition-shadow"
               style={{
                 display: 'inline',
-                fontSize: '15px',
+                fontSize: '16px',
                 lineHeight: '1.8',
                 backgroundColor: isPositive ? '#dcfce7' : '#fef9c3',
                 color: isPositive ? '#166534' : '#713f12',
@@ -426,16 +434,15 @@ export default function EditorClient({
         }
 
         result.push(
-          <div key={`line-${lineIdx}`} className="text-[15px] leading-[1.8]">
+          <div key={`line-${lineIdx}`} className="leading-[1.8]" style={{ fontSize: '16px' }}>
             {segments}
           </div>
         )
 
-        // 선택된 하이라이트 상세
+        // 선택된 하이라이트 상세 - 수정하기 버튼 제거, 바로 표시
         lineHighlights.forEach((hl) => {
           if (selectedHighlightIdx === hl.hlIdx) {
             const isPositive = hl.type === 'positive'
-            const isEditing = editingHighlightIdx === hl.hlIdx
             
             result.push(
               <div
@@ -460,34 +467,25 @@ export default function EditorClient({
                   </div>
                 )}
 
+                {/* 수정창 바로 표시 */}
                 {!isPositive && (
-                  <>
-                    {!isEditing ? (
-                      <button
-                        onClick={() => handleStartEdit(hl.hlIdx)}
-                        className="self-start min-h-[44px] px-4 py-2 text-sm text-zinc-700 border border-zinc-300 rounded-lg hover:bg-zinc-50 transition-colors"
-                      >
-                        수정하기
-                      </button>
-                    ) : (
-                      <div className="flex flex-col gap-2 bg-white border border-zinc-200 rounded-lg p-3">
-                        <input
-                          type="text"
-                          value={editText}
-                          onChange={(e) => setEditText(e.target.value)}
-                          placeholder="수정할 문장을 입력하세요"
-                          autoFocus
-                          className="w-full text-sm text-zinc-900 bg-transparent border-b border-zinc-200 pb-2 focus:outline-none focus:border-zinc-900"
-                        />
-                        <button
-                          onClick={handleApplyEdit}
-                          className="self-end min-h-[44px] px-4 py-2 bg-zinc-900 text-white text-sm rounded-lg hover:bg-zinc-700 transition-colors"
-                        >
-                          반영
-                        </button>
-                      </div>
-                    )}
-                  </>
+                  <div className="flex flex-col gap-2 bg-white border border-zinc-200 rounded-lg p-3">
+                    <input
+                      type="text"
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      placeholder="수정할 문장을 입력하세요"
+                      autoFocus
+                      className="w-full text-zinc-900 bg-transparent border-b border-zinc-200 pb-2 focus:outline-none focus:border-zinc-900"
+                      style={{ fontSize: '16px' }}
+                    />
+                    <button
+                      onClick={handleApplyEdit}
+                      className="self-end min-h-[44px] px-4 py-2 bg-zinc-900 text-white text-sm rounded-lg hover:bg-zinc-700 transition-colors"
+                    >
+                      반영
+                    </button>
+                  </div>
                 )}
               </div>
             )
@@ -526,23 +524,15 @@ export default function EditorClient({
           </button>
 
           <div className="flex items-center gap-3">
-            {feedbackMode === 'scanning' && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-white">글을 읽고 있어요</span>
-                <div className="flex gap-1">
-                  <span className="w-1 h-1 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1 h-1 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1 h-1 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              </div>
-            )}
-
             {feedbackMode === 'result' && (
               <button
                 onClick={handleCloseFeedback}
-                className="min-h-[44px] px-3 py-1.5 text-xs text-white border border-white/20 rounded-lg hover:bg-white/10"
+                className="min-h-[44px] px-3 py-1.5 text-xs text-white border border-white/20 rounded-lg hover:bg-white/10 flex items-center gap-1"
               >
-                종료
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>닫기</span>
               </button>
             )}
 
@@ -553,7 +543,7 @@ export default function EditorClient({
 
       <div className="w-full">
         <div className={`min-h-[calc(100vh-3.5rem)] border-x ${containerBorder} transition-colors duration-300 relative`}>
-          <div className="px-4 pt-6 pb-6">
+          <div className="px-4 pt-6 pb-4">
             {isEditingTopic || (isFree && !topicContent.trim()) ? (
               <input
                 type="text"
@@ -562,31 +552,57 @@ export default function EditorClient({
                 onBlur={handleTopicBlur}
                 placeholder={isFree ? '제목을 입력하세요' : ''}
                 autoFocus={isFree && !topicContent.trim()}
-                className="w-full text-[15px] font-semibold text-zinc-900 bg-transparent border-b border-zinc-300 pb-1 focus:outline-none focus:border-zinc-500 placeholder:text-zinc-400"
+                className="w-full font-semibold text-zinc-900 bg-transparent border-b border-zinc-300 pb-1 focus:outline-none focus:border-zinc-500 placeholder:text-zinc-400"
+                style={{ fontSize: '16px' }}
               />
             ) : (
               <button
                 onClick={() => setIsEditingTopic(true)}
-                className="w-full text-left text-[15px] font-semibold text-zinc-900 hover:text-zinc-600 min-h-[44px]"
+                className="w-full text-left font-semibold text-zinc-900 hover:text-zinc-600 min-h-[44px]"
+                style={{ fontSize: '16px' }}
               >
                 {topicContent}
               </button>
             )}
           </div>
 
+          {/* 제목/본문 구분선 */}
+          <div className="px-4 pb-4">
+            <div className="h-px bg-zinc-100" />
+          </div>
+
           {feedbackMode === 'result' && feedbackData && (
             <div className="px-4 pb-4">
-              <div className="bg-zinc-50 border-l-2 border-zinc-900 px-3 py-2 rounded-r-lg">
+              <div className="bg-amber-50 border-l-2 border-amber-500 px-3 py-2.5 rounded-r-lg">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm">💡</span>
+                  <p className="text-[10px] font-semibold text-amber-800 uppercase tracking-wide">
+                    글 흐름 파악
+                  </p>
+                </div>
                 <p className="text-xs text-zinc-700 leading-relaxed">{feedbackData.flow}</p>
               </div>
             </div>
           )}
 
+          {/* 스캔 오버레이 */}
           {feedbackMode === 'scanning' && (
             <div
               className="absolute inset-0 z-10 pointer-events-none"
-              style={{ backdropFilter: 'blur(2px)', backgroundColor: 'rgba(255,255,255,0.6)' }}
+              style={{ 
+                backdropFilter: 'blur(2px)', 
+                backgroundColor: 'rgba(255,255,255,0.6)',
+                top: 0  // 제목부터 블러 처리
+              }}
             >
+              {/* 스캔 설명 */}
+              <div className="absolute top-20 left-0 right-0 flex justify-center">
+                <div className="bg-zinc-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg">
+                  피드백을 위해 글을 분석하고 있어요
+                </div>
+              </div>
+              
+              {/* 스캔 라인 */}
               <div
                 className="h-1 bg-gradient-to-r from-transparent via-zinc-900/30 to-transparent"
                 style={{ animation: 'scan 2s ease-in-out infinite' }}
@@ -598,10 +614,13 @@ export default function EditorClient({
 
           {feedbackMode === 'result' && feedbackData && (
             <div className="px-4 pb-6">
-              <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3">
-                <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide mb-1">
-                  다음에 시도해볼 것
-                </p>
+              <div className="bg-blue-50 border-l-2 border-blue-500 rounded-r-lg p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm">✍️</span>
+                  <p className="text-[10px] font-semibold text-blue-800 uppercase tracking-wide">
+                    이렇게 써보면 어떨까요?
+                  </p>
+                </div>
                 <p className="text-xs text-zinc-700 leading-relaxed">{feedbackData.next}</p>
               </div>
             </div>
