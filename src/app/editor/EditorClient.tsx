@@ -30,6 +30,11 @@ type FeedbackData = {
   next: string
 }
 
+type ReferenceMemo = {
+  id: string
+  content: string
+}
+
 export default function EditorClient({
   userId,
   topicId,
@@ -48,6 +53,15 @@ export default function EditorClient({
   const [showAutoSaveTip, setShowAutoSaveTip] = useState(!draft?.body)
   const [mounted, setMounted] = useState(false)
 
+  // 글자 크기
+  const [fontSize, setFontSize] = useState(16)
+
+  // 키보드 높이 감지 (iOS Safari 대응)
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
+
+  // 참고 메모
+  const [referenceMemos, setReferenceMemos] = useState<ReferenceMemo[]>([])
+
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 10)
     return () => clearTimeout(t)
@@ -58,6 +72,30 @@ export default function EditorClient({
     const t = setTimeout(() => setShowAutoSaveTip(false), 1500)
     return () => clearTimeout(t)
   }, [showAutoSaveTip])
+
+  // ── iOS Safari 키보드 감지 ──────────────────────────────────
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    const vv = window.visualViewport
+    if (!vv) return
+
+    const handleViewportChange = () => {
+      // 키보드 높이 = 전체 화면 높이 - 실제 보이는 높이
+      const height = window.innerHeight - vv.height
+      
+      // 150px 이상일 때만 키보드로 판단 (주소창 등 제외)
+      setKeyboardHeight(height > 150 ? height : 0)
+    }
+
+    vv.addEventListener('resize', handleViewportChange)
+    vv.addEventListener('scroll', handleViewportChange)
+
+    return () => {
+      vv.removeEventListener('resize', handleViewportChange)
+      vv.removeEventListener('scroll', handleViewportChange)
+    }
+  }, [])
 
   // ── 이어쓰기 ────────────────────────────────────────────────
   const [suggestion, setSuggestion] = useState<string>('')
@@ -275,6 +313,29 @@ export default function EditorClient({
     setEditText('')
   }
 
+  // ── 참고 메모 ───────────────────────────────────────────────
+  const handleAddReference = () => {
+    if (!feedbackData?.next) return
+    const newMemo: ReferenceMemo = {
+      id: Date.now().toString(),
+      content: feedbackData.next,
+    }
+    setReferenceMemos([...referenceMemos, newMemo])
+  }
+
+  const handleDeleteMemo = (id: string) => {
+    setReferenceMemos(referenceMemos.filter(m => m.id !== id))
+  }
+
+  // ── 글자 크기 조절 ──────────────────────────────────────────
+  const decreaseFontSize = () => {
+    setFontSize(prev => Math.max(14, prev - 2))
+  }
+
+  const increaseFontSize = () => {
+    setFontSize(prev => Math.min(18, prev + 2))
+  }
+
   const handleBack = async () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current)
     if (body.trim()) await triggerSave()
@@ -284,6 +345,15 @@ export default function EditorClient({
   const handleTopicBlur = () => {
     setIsEditingTopic(false)
     if (body.trim()) scheduleAutosave()
+  }
+
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const v = e.target.value
+    setBody(v)
+    bodyRef.current = v
+    scheduleAutosave()
+    clearSuggestion()
+    scheduleSuggestion()
   }
 
   const canFeedback = body.trim().length >= 50
@@ -296,20 +366,13 @@ export default function EditorClient({
           <textarea
             ref={textareaRef}
             value={body}
-            onChange={(e) => {
-              const v = e.target.value
-              setBody(v)
-              bodyRef.current = v
-              scheduleAutosave()
-              clearSuggestion()
-              scheduleSuggestion()
-            }}
+            onChange={handleTextareaChange}
             placeholder="떠오르는 장면부터 써봐요..."
             className="w-full text-zinc-700 leading-[1.8] resize-none focus:outline-none bg-transparent"
             style={{ 
-              fontSize: '16px',
+              fontSize: `${fontSize}px`,
               minHeight: '50vh',
-              paddingBottom: '80px',
+              paddingBottom: `${Math.max(120, keyboardHeight + 80)}px`,
             }}
           />
 
@@ -329,10 +392,11 @@ export default function EditorClient({
             </div>
           )}
 
+          {/* 이어쓰기 제안 */}
           {showSuggest && (
             <div className="relative mt-2">
               <div className="flex items-start gap-2">
-                <span className="text-zinc-400 leading-[1.8]" style={{ fontSize: '16px' }}>{suggestion}</span>
+                <span className="text-zinc-400 leading-[1.8]" style={{ fontSize: `${fontSize}px`, fontStyle: 'italic' }}>{suggestion}</span>
                 <div className="flex gap-1 shrink-0">
                   <button
                     onClick={handleAccept}
@@ -355,6 +419,34 @@ export default function EditorClient({
               )}
             </div>
           )}
+
+          {/* 참고 메모 */}
+          {referenceMemos.map(memo => (
+            <div
+              key={memo.id}
+              className="relative my-4 bg-blue-50 border border-blue-200 rounded-lg p-3"
+              style={{ borderStyle: 'dashed' }}
+            >
+              <button
+                onClick={() => handleDeleteMemo(memo.id)}
+                className="absolute top-2 right-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-zinc-400 hover:text-zinc-600"
+                style={{ fontSize: '24px' }}
+              >
+                ×
+              </button>
+              <div className="text-[12px] text-blue-700 font-medium mb-1">
+                📝 참고 메모
+              </div>
+              <div 
+                contentEditable
+                suppressContentEditableWarning
+                className="text-[14px] text-zinc-700 leading-relaxed outline-none pr-10"
+                style={{ fontSize: `${Math.max(14, fontSize - 2)}px` }}
+              >
+                {memo.content}
+              </div>
+            </div>
+          ))}
         </>
       )
     }
@@ -377,7 +469,7 @@ export default function EditorClient({
 
       if (lineHighlights.length === 0) {
         result.push(
-          <div key={`line-${lineIdx}`} className="text-zinc-700 leading-[1.8]" style={{ fontSize: '16px' }}>
+          <div key={`line-${lineIdx}`} className="text-zinc-700 leading-[1.8]" style={{ fontSize: `${fontSize}px` }}>
             {line}
           </div>
         )
@@ -406,7 +498,7 @@ export default function EditorClient({
               className="cursor-pointer px-1 rounded transition-shadow"
               style={{
                 display: 'inline',
-                fontSize: '16px',
+                fontSize: `${fontSize}px`,
                 lineHeight: '1.8',
                 backgroundColor: isPositive ? '#dcfce7' : '#fef9c3',
                 color: isPositive ? '#166534' : '#713f12',
@@ -434,12 +526,12 @@ export default function EditorClient({
         }
 
         result.push(
-          <div key={`line-${lineIdx}`} className="leading-[1.8]" style={{ fontSize: '16px' }}>
+          <div key={`line-${lineIdx}`} className="leading-[1.8]" style={{ fontSize: `${fontSize}px` }}>
             {segments}
           </div>
         )
 
-        // 선택된 하이라이트 상세 - 수정하기 버튼 제거, 바로 표시
+        // 선택된 하이라이트 상세
         lineHighlights.forEach((hl) => {
           if (selectedHighlightIdx === hl.hlIdx) {
             const isPositive = hl.type === 'positive'
@@ -467,7 +559,6 @@ export default function EditorClient({
                   </div>
                 )}
 
-                {/* 수정창 바로 표시 */}
                 {!isPositive && (
                   <div className="flex flex-col gap-2 bg-white border border-zinc-200 rounded-lg p-3">
                     <input
@@ -477,7 +568,7 @@ export default function EditorClient({
                       placeholder="수정할 문장을 입력하세요"
                       autoFocus
                       className="w-full text-zinc-900 bg-transparent border-b border-zinc-200 pb-2 focus:outline-none focus:border-zinc-900"
-                      style={{ fontSize: '16px' }}
+                      style={{ fontSize: `${fontSize}px` }}
                     />
                     <button
                       onClick={handleApplyEdit}
@@ -506,6 +597,11 @@ export default function EditorClient({
       className={`min-h-screen bg-white transition-opacity duration-500 ${
         mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
       }`}
+      style={{ 
+        minHeight: '100dvh',
+        display: 'flex',
+        flexDirection: 'column'
+      }}
     >
       <header
         className={`sticky top-0 z-20 ${headerBg} transition-colors duration-300`}
@@ -541,8 +637,9 @@ export default function EditorClient({
         </div>
       </header>
 
-      <div className="w-full">
-        <div className={`min-h-[calc(100vh-3.5rem)] border-x ${containerBorder} transition-colors duration-300 relative`}>
+      <div className="flex-1 w-full overflow-auto">
+        <div className={`min-h-full border-x ${containerBorder} transition-colors duration-300 relative`}>
+          {/* 제목 */}
           <div className="px-4 pt-6 pb-4">
             {isEditingTopic || (isFree && !topicContent.trim()) ? (
               <input
@@ -553,13 +650,13 @@ export default function EditorClient({
                 placeholder={isFree ? '제목을 입력하세요' : ''}
                 autoFocus={isFree && !topicContent.trim()}
                 className="w-full font-semibold text-zinc-900 bg-transparent border-b border-zinc-300 pb-1 focus:outline-none focus:border-zinc-500 placeholder:text-zinc-400"
-                style={{ fontSize: '16px' }}
+                style={{ fontSize: `${fontSize}px` }}
               />
             ) : (
               <button
                 onClick={() => setIsEditingTopic(true)}
                 className="w-full text-left font-semibold text-zinc-900 hover:text-zinc-600 min-h-[44px]"
-                style={{ fontSize: '16px' }}
+                style={{ fontSize: `${fontSize}px` }}
               >
                 {topicContent}
               </button>
@@ -571,6 +668,30 @@ export default function EditorClient({
             <div className="h-px bg-zinc-100" />
           </div>
 
+          {/* 스캔 오버레이 */}
+          {feedbackMode === 'scanning' && (
+            <div
+              className="absolute inset-0 z-10 pointer-events-none"
+              style={{ 
+                backdropFilter: 'blur(2px)', 
+                backgroundColor: 'rgba(255,255,255,0.6)',
+                top: 0
+              }}
+            >
+              <div className="absolute top-20 left-0 right-0 flex justify-center">
+                <div className="bg-zinc-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg">
+                  피드백을 위해 글을 분석하고 있어요
+                </div>
+              </div>
+              
+              <div
+                className="h-1 bg-gradient-to-r from-transparent via-zinc-900/30 to-transparent"
+                style={{ animation: 'scan 2s ease-in-out infinite' }}
+              />
+            </div>
+          )}
+
+          {/* 피드백 구조 배너 */}
           {feedbackMode === 'result' && feedbackData && (
             <div className="px-4 pb-4">
               <div className="bg-amber-50 border-l-2 border-amber-500 px-3 py-2.5 rounded-r-lg">
@@ -585,33 +706,10 @@ export default function EditorClient({
             </div>
           )}
 
-          {/* 스캔 오버레이 */}
-          {feedbackMode === 'scanning' && (
-            <div
-              className="absolute inset-0 z-10 pointer-events-none"
-              style={{ 
-                backdropFilter: 'blur(2px)', 
-                backgroundColor: 'rgba(255,255,255,0.6)',
-                top: 0  // 제목부터 블러 처리
-              }}
-            >
-              {/* 스캔 설명 */}
-              <div className="absolute top-20 left-0 right-0 flex justify-center">
-                <div className="bg-zinc-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg">
-                  피드백을 위해 글을 분석하고 있어요
-                </div>
-              </div>
-              
-              {/* 스캔 라인 */}
-              <div
-                className="h-1 bg-gradient-to-r from-transparent via-zinc-900/30 to-transparent"
-                style={{ animation: 'scan 2s ease-in-out infinite' }}
-              />
-            </div>
-          )}
-
+          {/* 본문 */}
           <div className="px-4 pb-20">{renderBody()}</div>
 
+          {/* 피드백 제안 박스 */}
           {feedbackMode === 'result' && feedbackData && (
             <div className="px-4 pb-6">
               <div className="bg-blue-50 border-l-2 border-blue-500 rounded-r-lg p-3">
@@ -621,48 +719,84 @@ export default function EditorClient({
                     이렇게 써보면 어떨까요?
                   </p>
                 </div>
-                <p className="text-xs text-zinc-700 leading-relaxed">{feedbackData.next}</p>
+                <p className="text-xs text-zinc-700 leading-relaxed mb-2">{feedbackData.next}</p>
+                <button
+                  onClick={handleAddReference}
+                  className="min-h-[44px] px-3 py-1.5 text-xs text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors"
+                >
+                  📝 아래에 추가하기
+                </button>
               </div>
             </div>
           )}
+        </div>
+      </div>
 
-          <div
-            className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-100 z-30"
-            style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
-          >
-            <div className="w-full px-4 py-3">
-              {feedbackMode === 'off' && (
-                <div className="flex items-center justify-between">
-                  <div className="flex gap-1">
-                    <FormatButton label="B" bold onClick={() => insertFormat('**', textareaRef, setBody, scheduleAutosave)} />
-                    <FormatButton label="I" italic onClick={() => insertFormat('*', textareaRef, setBody, scheduleAutosave)} />
-                  </div>
-                  <button
-                    onClick={handleFeedback}
-                    disabled={!canFeedback || feedbackMode !== 'off'}
-                    className={`min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      canFeedback && feedbackMode === 'off'
-                        ? 'bg-zinc-900 text-white hover:bg-zinc-700'
-                        : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
-                    }`}
-                  >
-                    ✦ 피드백
-                  </button>
-                </div>
-              )}
-
-              {feedbackError && (
-                <div className="text-center">
-                  <p className="text-xs text-zinc-500 mb-2">잠깐 문제가 생겼어요. 다시 시도해볼게요.</p>
-                  <button onClick={handleFeedback} className="text-xs text-zinc-400 underline min-h-[44px]">
-                    다시 시도
-                  </button>
-                </div>
-              )}
+      {/* 하단 툴바 - 키보드 위로 자동 이동 */}
+      {feedbackMode === 'off' && (
+        <div
+          className="sticky bg-white border-t border-zinc-100 z-30 transition-all duration-200"
+          style={{
+            bottom: keyboardHeight > 0 ? `${keyboardHeight}px` : '0px',
+            paddingBottom: 'max(env(safe-area-inset-bottom), 12px)'
+          }}
+        >
+          <div className="w-full px-4 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => insertFormat('**', textareaRef, setBody, scheduleAutosave)}
+                  className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm font-bold"
+                >
+                  B
+                </button>
+                <button
+                  onClick={() => insertFormat('*', textareaRef, setBody, scheduleAutosave)}
+                  className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm italic"
+                >
+                  I
+                </button>
+                <div className="h-6 w-px bg-zinc-200 mx-1" />
+                <button
+                  onClick={decreaseFontSize}
+                  className="min-w-[44px] min-h-[44px] w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
+                >
+                  −
+                </button>
+                <span className="text-sm text-zinc-600 w-6 text-center">{fontSize}</span>
+                <button
+                  onClick={increaseFontSize}
+                  className="min-w-[44px] min-h-[44px] w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
+                >
+                  +
+                </button>
+              </div>
+              <button
+                onClick={handleFeedback}
+                disabled={!canFeedback || feedbackMode !== 'off'}
+                className={`min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  canFeedback && feedbackMode === 'off'
+                    ? 'bg-zinc-900 text-white hover:bg-zinc-700'
+                    : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
+                }`}
+              >
+                ✦ 피드백
+              </button>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {feedbackError && (
+        <div className="fixed bottom-20 left-0 right-0 px-4 z-30">
+          <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-center">
+            <p className="text-xs text-zinc-500 mb-2">잠깐 문제가 생겼어요. 다시 시도해볼게요.</p>
+            <button onClick={handleFeedback} className="text-xs text-zinc-400 underline min-h-[44px]">
+              다시 시도
+            </button>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes scan {
@@ -690,18 +824,6 @@ function SaveIndicator({ status }: { status: SaveStatus }) {
   }
   const { text, cls } = map[status]
   return <span className={`text-xs ${cls}`}>{text}</span>
-}
-
-function FormatButton({ label, bold, italic, onClick }: { label: string; bold?: boolean; italic?: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm"
-      style={{ fontWeight: bold ? 700 : 400, fontStyle: italic ? 'italic' : 'normal' }}
-    >
-      {label}
-    </button>
-  )
 }
 
 function insertFormat(
