@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import type { ReactElement } from 'react'
 import { useRouter } from 'next/navigation'
 import { saveWriting } from '../actions/editor'
 import type { WritingDraft } from '../actions/editor'
@@ -354,7 +355,7 @@ export default function EditorClient({
     if (!feedbackData) return null
 
     const lines = body.split('\n')
-    const result: JSX.Element[] = []
+    const result: ReactElement[] = []
 
     lines.forEach((line, lineIdx) => {
       if (!line.trim()) {
