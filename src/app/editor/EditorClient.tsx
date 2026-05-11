@@ -321,6 +321,11 @@ export default function EditorClient({
       content: feedbackData.next,
     }
     setReferenceMemos([...referenceMemos, newMemo])
+    
+    // 피드백 모드 종료해서 본문에 메모가 보이도록
+    setFeedbackMode('off')
+    setFeedbackData(null)
+    setSelectedHighlightIdx(null)
   }
 
   const handleDeleteMemo = (id: string) => {
@@ -372,7 +377,8 @@ export default function EditorClient({
             style={{ 
               fontSize: `${fontSize}px`,
               minHeight: '50vh',
-              paddingBottom: `${Math.max(120, keyboardHeight + 80)}px`,
+              // 툴바 높이(60px) + 여유(20px) + 키보드 고려
+              paddingBottom: keyboardHeight > 0 ? '80px' : '120px',
             }}
           />
 
@@ -594,30 +600,32 @@ export default function EditorClient({
 
   return (
     <div
-      className={`min-h-screen bg-white transition-opacity duration-500 ${
+      className={`flex flex-col bg-white transition-opacity duration-500 ${
         mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
       }`}
       style={{ 
-        minHeight: '100dvh',
-        display: 'flex',
-        flexDirection: 'column'
+        height: '100dvh',
       }}
     >
       <header
-        className={`sticky top-0 z-20 ${headerBg} transition-colors duration-300`}
+        className={`flex-none sticky top-0 z-20 ${headerBg} transition-colors duration-300`}
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}
       >
         <div className="w-full px-4 h-14 flex items-center justify-between">
-          <button
-            onClick={handleBack}
-            className={`p-2 -ml-2 min-w-[44px] min-h-[44px] transition-colors ${
-              isInFeedbackMode ? 'text-white' : 'text-zinc-400 hover:text-zinc-900'
-            }`}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          {/* 뒤로가기 - 피드백 모드가 아닐 때만 표시 */}
+          {feedbackMode === 'off' && (
+            <button
+              onClick={handleBack}
+              className="p-2 -ml-2 min-w-[44px] min-h-[44px] transition-colors text-zinc-400 hover:text-zinc-900"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+
+          {/* 피드백 모드일 때는 빈 공간 */}
+          {feedbackMode !== 'off' && <div className="w-10" />}
 
           <div className="flex items-center gap-3">
             {feedbackMode === 'result' && (
@@ -637,7 +645,8 @@ export default function EditorClient({
         </div>
       </header>
 
-      <div className="flex-1 w-full overflow-auto">
+      {/* 본문 영역 - 독립 스크롤 */}
+      <div className="flex-1 overflow-y-auto">
         <div className={`min-h-full border-x ${containerBorder} transition-colors duration-300 relative`}>
           {/* 제목 */}
           <div className="px-4 pt-6 pb-4">
@@ -707,7 +716,7 @@ export default function EditorClient({
           )}
 
           {/* 본문 */}
-          <div className="px-4 pb-20">{renderBody()}</div>
+          <div className="px-4 pb-32">{renderBody()}</div>
 
           {/* 피드백 제안 박스 */}
           {feedbackMode === 'result' && feedbackData && (
@@ -735,10 +744,12 @@ export default function EditorClient({
       {/* 하단 툴바 - 키보드 위로 자동 이동 */}
       {feedbackMode === 'off' && (
         <div
-          className="sticky bg-white border-t border-zinc-100 z-30 transition-all duration-200"
+          className="flex-none bg-white border-t border-zinc-100 z-30"
           style={{
             bottom: keyboardHeight > 0 ? `${keyboardHeight}px` : '0px',
-            paddingBottom: 'max(env(safe-area-inset-bottom), 12px)'
+            paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
+            transition: 'bottom 0.15s ease-out',
+            position: 'relative',
           }}
         >
           <div className="w-full px-4 py-3">
