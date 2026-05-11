@@ -375,7 +375,7 @@ export default function EditorClient({
         )
       } else {
         let remaining = line
-        const segments: JSX.Element[] = []
+        const segments: ReactElement[] = []
 
         lineHighlights.forEach((hl, idx) => {
           const pos = remaining.indexOf(hl.text)
@@ -627,7 +627,7 @@ export default function EditorClient({
                         : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
                     }`}
                   >
-                    {feedbackMode === 'scanning' ? '읽는 중...' : '✦ 피드백'}
+                    ✦ 피드백
                   </button>
                 </div>
               )}
