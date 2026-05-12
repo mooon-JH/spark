@@ -47,7 +47,9 @@ export default function EditorClient({
 
   const [writingId, setWritingId] = useState<string | null>(draft?.id ?? null)
   const [topicContent, setTopicContent] = useState(draft?.topic_content ?? initialTopicContent)
+  // body: HTML 저장 (굵기/이탤릭 포함), bodyText: 순수 텍스트 (API 전송 · 피드백 매칭용)
   const [body, setBody] = useState(draft?.body ?? '')
+  const [bodyText, setBodyText] = useState(draft?.body ?? '')
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [isEditingTopic, setIsEditingTopic] = useState(false)
   const [showAutoSaveTip, setShowAutoSaveTip] = useState(!draft?.body)
@@ -118,21 +120,43 @@ export default function EditorClient({
   // ── refs ────────────────────────────────────────────────────
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const writingIdRef = useRef<string | null>(writingId)
-  const bodyRef = useRef(body)
+  const bodyRef = useRef(body)         // HTML
+  const bodyTextRef = useRef(bodyText) // 순수 텍스트
   const topicRef = useRef(topicContent)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const editorRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => { writingIdRef.current = writingId }, [writingId])
   useEffect(() => { bodyRef.current = body }, [body])
+  useEffect(() => { bodyTextRef.current = bodyText }, [bodyText])
   useEffect(() => { topicRef.current = topicContent }, [topicContent])
+
+  // contentEditable 초기 콘텐츠 설정 (마운트 시 1회)
+  useEffect(() => {
+    const el = editorRef.current
+    if (!el) return
+    el.innerHTML = draft?.body ?? ''
+    // 커서를 끝으로
+    const range = document.createRange()
+    const sel = window.getSelection()
+    range.selectNodeContents(el)
+    range.collapse(false)
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+    el.focus()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (feedbackMode === 'off') {
-      const el = textareaRef.current
+      const el = editorRef.current
       if (!el) return
-      const len = el.value.length
       el.focus()
-      el.setSelectionRange(len, len)
+      const range = document.createRange()
+      const sel = window.getSelection()
+      range.selectNodeContents(el)
+      range.collapse(false)
+      sel?.removeAllRanges()
+      sel?.addRange(range)
     }
   }, [feedbackMode])
 
@@ -170,26 +194,19 @@ export default function EditorClient({
     }
   }, [triggerSave])
 
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [body])
-
   // ── 이어쓰기 API ─────────────────────────────────────────────
   const fetchSuggestion = useCallback(async () => {
     if (cooldownRef.current || isAcceptingRef.current) return
-    if (!bodyRef.current.trim()) return
+    if (!bodyTextRef.current.trim()) return
     if (feedbackMode !== 'off') return
-    
+
     setIsFetchingSuggest(true)
-    
+
     try {
       const res = await fetch('/api/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: bodyRef.current }),
+        body: JSON.stringify({ body: bodyTextRef.current }), // 순수 텍스트 전송
       })
       if (!res.ok) return
       const { suggestion: text } = await res.json()
@@ -224,7 +241,19 @@ export default function EditorClient({
     setShowSuggest(false)
     setShowTooltip(false)
 
-    const prefix = bodyRef.current.endsWith(' ') || bodyRef.current.endsWith('\n') ? '' : ' '
+    const el = editorRef.current
+    if (!el) return
+
+    // 커서를 콘텐츠 끝으로 이동
+    el.focus()
+    const range = document.createRange()
+    const sel = window.getSelection()
+    range.selectNodeContents(el)
+    range.collapse(false)
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+
+    const prefix = bodyTextRef.current.endsWith(' ') || bodyTextRef.current.endsWith('\n') ? '' : ' '
     const text = prefix + suggestion
 
     let i = 0
@@ -237,13 +266,9 @@ export default function EditorClient({
         scheduleAutosave()
         return
       }
-      const char = text[i]
+      // execCommand로 커서 위치에 한 글자씩 삽입 → onInput 이벤트 자동 발생
+      document.execCommand('insertText', false, text[i])
       i++
-      setBody((prev) => {
-        const next = prev + char
-        bodyRef.current = next
-        return next
-      })
     }, 60)
   }, [suggestion, scheduleAutosave])
 
@@ -266,7 +291,7 @@ export default function EditorClient({
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: bodyRef.current }),
+        body: JSON.stringify({ body: bodyTextRef.current }), // 순수 텍스트 전송
       })
       if (!res.ok) throw new Error()
       const data = await res.json()
@@ -301,9 +326,16 @@ export default function EditorClient({
   const handleApplyEdit = () => {
     if (selectedHighlightIdx === null || !feedbackData) return
     const hl = feedbackData.highlights[selectedHighlightIdx]
-    const newBody = body.replace(hl.text, editText)
-    setBody(newBody)
-    bodyRef.current = newBody
+    // bodyText(순수 텍스트)에서 교체 후 editor에 반영
+    const newText = bodyTextRef.current.replace(hl.text, editText)
+    const el = editorRef.current
+    if (el) {
+      el.innerText = newText          // 서식은 초기화되지만 텍스트 정확히 반영
+      bodyRef.current = el.innerHTML
+      bodyTextRef.current = newText
+      setBody(el.innerHTML)
+      setBodyText(newText)
+    }
     scheduleAutosave()
 
     const updatedHighlights = [...feedbackData.highlights]
@@ -360,36 +392,53 @@ export default function EditorClient({
 
   const handleTopicBlur = () => {
     setIsEditingTopic(false)
-    if (body.trim()) scheduleAutosave()
+    if (bodyTextRef.current.trim()) scheduleAutosave()
   }
 
-  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const v = e.target.value
-    setBody(v)
-    bodyRef.current = v
+  // contentEditable 입력 핸들러
+  const handleEditorInput = () => {
+    const el = editorRef.current
+    if (!el) return
+    const html = el.innerHTML
+    const text = el.innerText
+    setBody(html)
+    setBodyText(text)
+    bodyRef.current = html
+    bodyTextRef.current = text
     scheduleAutosave()
     clearSuggestion()
     scheduleSuggestion()
   }
 
-  const canFeedback = body.trim().length >= 50
+  // 서식 — execCommand로 선택 텍스트에 즉시 반영
+  const handleBold = () => {
+    document.execCommand('bold')
+    editorRef.current?.focus()
+  }
+  const handleItalic = () => {
+    document.execCommand('italic')
+    editorRef.current?.focus()
+  }
+
+  const canFeedback = bodyText.trim().length >= 50
 
   // ── 하이라이트된 원문 렌더링 ─────────────────────────────────
   const renderBody = () => {
     if (feedbackMode === 'off') {
       return (
         <>
-          <textarea
-            ref={textareaRef}
-            value={body}
-            onChange={handleTextareaChange}
-            placeholder="떠오르는 장면부터 써봐요..."
-            className="w-full text-zinc-700 leading-[1.8] resize-none focus:outline-none bg-transparent"
-            style={{ 
+          <div
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
+            onInput={handleEditorInput}
+            data-placeholder="떠오르는 장면부터 써봐요..."
+            className="w-full text-zinc-700 leading-[1.8] focus:outline-none bg-transparent editor-content"
+            style={{
               fontSize: `${fontSize}px`,
               minHeight: '50vh',
-              // 툴바 높이(60px) + 여유(20px) + 키보드 고려
               paddingBottom: keyboardHeight > 0 ? '80px' : '120px',
+              wordBreak: 'break-word',
             }}
           />
 
@@ -471,12 +520,13 @@ export default function EditorClient({
     // 피드백 모드
     if (!feedbackData) return null
 
-    // 매칭 가능한 하이라이트만 필터 (폴백: 매칭 없어도 피드백 배너는 유지)
+    // 피드백 모드: 순수 텍스트 기준으로 매칭 (HTML 태그 영향 없음)
+    const plainText = bodyTextRef.current
     const matchedHighlights = feedbackData.highlights.filter((hl) =>
-      body.includes(hl.text)
+      plainText.includes(hl.text)
     )
 
-    const lines = body.split('\n')
+    const lines = plainText.split('\n')
     const result: ReactElement[] = []
 
     lines.forEach((line, lineIdx) => {
@@ -770,7 +820,20 @@ export default function EditorClient({
         >
           <div className="w-full px-4 py-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <button
+                  onMouseDown={(e) => { e.preventDefault(); handleBold() }}
+                  className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm font-bold"
+                >
+                  B
+                </button>
+                <button
+                  onMouseDown={(e) => { e.preventDefault(); handleItalic() }}
+                  className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm italic"
+                >
+                  I
+                </button>
+                <div className="h-5 w-px bg-zinc-200 mx-1" />
                 <button
                   onClick={decreaseFontSize}
                   className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
@@ -831,6 +894,18 @@ export default function EditorClient({
         .animate-slideDown {
           animation: slideDown 0.3s ease-out;
         }
+        /* contentEditable placeholder */
+        .editor-content:empty::before {
+          content: attr(data-placeholder);
+          color: rgb(212 212 216);
+          pointer-events: none;
+          display: block;
+        }
+        /* 에디터 서식 렌더링 */
+        .editor-content b,
+        .editor-content strong { font-weight: 700; }
+        .editor-content i,
+        .editor-content em { font-style: italic; }
       `}</style>
     </div>
   )

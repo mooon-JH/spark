@@ -28,8 +28,8 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
   const [expandState, setExpandState] = useState<'idle' | 'init' | 'open'>('idle')
   const [expandRect, setExpandRect] = useState<ExpandRect | null>(null)
 
-  // 좋아요 시각 피드백
-  const [likedCardId, setLikedCardId] = useState<string | null>(null)
+  // 좋아요 — 누른 카드 ID를 Set으로 관리, 영구 유지
+  const [likedCardIds, setLikedCardIds] = useState<Set<string>>(new Set())
 
   // 진입 페이드인
   useEffect(() => {
@@ -60,8 +60,7 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
   const handleFeedback = async (feedback: 'like' | 'dislike') => {
     if (!currentCard) return
     if (feedback === 'like') {
-      setLikedCardId(currentCard.id)
-      setTimeout(() => setLikedCardId(null), 800)
+      setLikedCardIds((prev) => new Set(prev).add(currentCard.id))
     }
     await recordTopicFeedback(userId, currentCard.id, feedback)
     if (feedback === 'dislike') handleNext()
@@ -197,14 +196,11 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
               >
                 <svg
                   width="18" height="18" viewBox="0 0 24 24"
-                  fill={likedCardId === currentCard?.id ? 'currentColor' : 'none'}
+                  fill={likedCardIds.has(currentCard?.id ?? '') ? 'currentColor' : 'none'}
                   stroke="currentColor" strokeWidth="1.5"
                   strokeLinecap="round" strokeLinejoin="round"
-                  style={{
-                    color: likedCardId === currentCard?.id ? '#71717a' : undefined,
-                    transition: 'color 0.2s ease, fill 0.2s ease',
-                  }}
-                  className={likedCardId === currentCard?.id ? 'text-zinc-500' : 'text-zinc-300 group-hover:text-zinc-700 transition-colors'}
+                  style={{ transition: 'color 0.2s ease, fill 0.2s ease' }}
+                  className={likedCardIds.has(currentCard?.id ?? '') ? 'text-zinc-500' : 'text-zinc-300 group-hover:text-zinc-700 transition-colors'}
                 >
                   <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z" />
                   <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
