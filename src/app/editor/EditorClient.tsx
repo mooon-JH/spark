@@ -13,6 +13,7 @@ type Props = {
   isFree: boolean
   draft: WritingDraft | null
   returnTo?: 'home' | 'archive'
+  initialBody?: string
 }
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -42,14 +43,15 @@ export default function EditorClient({
   isFree,
   draft,
   returnTo = 'home',
+  initialBody = '',
 }: Props) {
   const router = useRouter()
 
   const [writingId, setWritingId] = useState<string | null>(draft?.id ?? null)
   const [topicContent, setTopicContent] = useState(draft?.topic_content ?? initialTopicContent)
   // body: HTML 저장 (굵기/이탤릭 포함), bodyText: 순수 텍스트 (API 전송 · 피드백 매칭용)
-  const [body, setBody] = useState(draft?.body ?? '')
-  const [bodyText, setBodyText] = useState(draft?.body ?? '')
+  const [body, setBody] = useState(draft?.body ?? initialBody)
+  const [bodyText, setBodyText] = useState(draft?.body ?? initialBody)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [isEditingTopic, setIsEditingTopic] = useState(false)
   const [showAutoSaveTip, setShowAutoSaveTip] = useState(!draft?.body)
@@ -134,7 +136,7 @@ export default function EditorClient({
   useEffect(() => {
     const el = editorRef.current
     if (!el) return
-    el.innerHTML = draft?.body ?? ''
+    el.innerHTML = draft?.body ?? initialBody
     // 커서를 끝으로
     const range = document.createRange()
     const sel = window.getSelection()
@@ -319,7 +321,8 @@ export default function EditorClient({
     } else {
       setSelectedHighlightIdx(idx)
       const hl = feedbackData?.highlights[idx]
-      setEditText(hl?.text ?? '')
+      // 예시 문장이 있으면 예시로 pre-fill (회색), 없으면 원문
+      setEditText(hl?.example ?? hl?.text ?? '')
     }
   }
 
@@ -422,105 +425,46 @@ export default function EditorClient({
 
   const canFeedback = bodyText.trim().length >= 50
 
-  // ── 하이라이트된 원문 렌더링 ─────────────────────────────────
+  // ── 피드백 뷰 렌더링 (scanning: 블러 미리보기, result: 하이라이트) ────────
   const renderBody = () => {
-    if (feedbackMode === 'off') {
+    // feedbackMode === 'off': contentEditable이 항상 DOM에 유지됨 (아래 JSX 참고)
+    if (feedbackMode === 'off') return null
+
+    // 스캔 중: 원문을 블러 처리해서 보여줌 (item 1)
+    if (feedbackMode === 'scanning') {
       return (
-        <>
+        <div>
+          <div className="flex justify-center mb-6 pt-4">
+            <div className="bg-zinc-900 text-white text-xs px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              피드백을 위해 글을 분석하고 있어요
+            </div>
+          </div>
           <div
-            ref={editorRef}
-            contentEditable
-            suppressContentEditableWarning
-            onInput={handleEditorInput}
-            data-placeholder="떠오르는 장면부터 써봐요..."
-            className="w-full text-zinc-700 leading-[1.8] focus:outline-none bg-transparent editor-content"
             style={{
-              fontSize: `${fontSize}px`,
+              filter: 'blur(3px)',
+              pointerEvents: 'none',
+              userSelect: 'none',
               minHeight: '50vh',
-              paddingBottom: keyboardHeight > 0 ? '80px' : '120px',
-              wordBreak: 'break-word',
             }}
-          />
-
-          {showAutoSaveTip && (
-            <div className="mt-2 text-xs text-zinc-400">자동으로 저장돼요.</div>
-          )}
-
-          {/* 이어쓰기 로딩 */}
-          {isFetchingSuggest && !showSuggest && (
-            <div className="mt-2 flex items-center gap-2 text-zinc-400">
-              <div className="flex gap-1">
-                <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-              <span className="text-xs">다음 문장 제안 중...</span>
-            </div>
-          )}
-
-          {/* 이어쓰기 제안 */}
-          {showSuggest && (
-            <div className="relative mt-2">
-              <div className="flex items-start gap-2">
-                <span className="text-zinc-400 leading-[1.8]" style={{ fontSize: `${fontSize}px`, fontStyle: 'italic' }}>{suggestion}</span>
-                <div className="flex gap-1 shrink-0">
-                  <button
-                    onClick={handleAccept}
-                    className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-sm font-bold"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    onClick={handleReject}
-                    className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-sm font-bold"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-              {showTooltip && (
-                <div className="absolute -top-10 left-0 bg-zinc-900 text-white text-[11px] px-3 py-2 rounded-lg whitespace-nowrap shadow-lg">
-                  ✓ 수락 · × 거절
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 참고 메모 */}
-          {referenceMemos.map(memo => (
-            <div
-              key={memo.id}
-              className="relative my-4 bg-blue-50 border border-blue-200 rounded-lg p-3"
-              style={{ borderStyle: 'dashed' }}
-            >
-              <button
-                onClick={() => handleDeleteMemo(memo.id)}
-                className="absolute top-2 right-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-zinc-400 hover:text-zinc-600"
-                style={{ fontSize: '24px' }}
+          >
+            {bodyText.split('\n').map((line, i) => (
+              <div
+                key={i}
+                className="text-zinc-700 leading-[1.8]"
+                style={{ fontSize: `${fontSize}px` }}
               >
-                ×
-              </button>
-              <div className="text-[12px] text-blue-700 font-medium mb-1">
-                📝 참고 메모
+                {line || ' '}
               </div>
-              <div 
-                contentEditable
-                suppressContentEditableWarning
-                className="text-[14px] text-zinc-700 leading-relaxed outline-none pr-10"
-                style={{ fontSize: `${Math.max(14, fontSize - 2)}px` }}
-              >
-                {memo.content}
-              </div>
-            </div>
-          ))}
-        </>
+            ))}
+          </div>
+        </div>
       )
     }
 
-    // 피드백 모드
+    // 결과 모드: 하이라이트 뷰 (비하이라이트 텍스트는 블러 — item 1)
     if (!feedbackData) return null
 
-    // 피드백 모드: 순수 텍스트 기준으로 매칭 (HTML 태그 영향 없음)
     const plainText = bodyTextRef.current
     const matchedHighlights = feedbackData.highlights.filter((hl) =>
       plainText.includes(hl.text)
@@ -540,8 +484,17 @@ export default function EditorClient({
         .filter((hl) => line.includes(hl.text))
 
       if (lineHighlights.length === 0) {
+        // 하이라이트 없는 줄: 블러 처리 (item 1)
         result.push(
-          <div key={`line-${lineIdx}`} className="text-zinc-700 leading-[1.8]" style={{ fontSize: `${fontSize}px` }}>
+          <div
+            key={`line-${lineIdx}`}
+            className="leading-[1.8]"
+            style={{
+              fontSize: `${fontSize}px`,
+              filter: 'blur(1.5px)',
+              opacity: 0.4,
+            }}
+          >
             {line}
           </div>
         )
@@ -554,8 +507,13 @@ export default function EditorClient({
           if (pos === -1) return
 
           if (pos > 0) {
+            // 하이라이트 앞 일반 텍스트: 블러
             segments.push(
-              <span key={`before-${idx}`} className="text-zinc-700">
+              <span
+                key={`before-${idx}`}
+                className="text-zinc-700"
+                style={{ filter: 'blur(1.5px)', opacity: 0.4 }}
+              >
                 {remaining.slice(0, pos)}
               </span>
             )
@@ -590,8 +548,13 @@ export default function EditorClient({
         })
 
         if (remaining) {
+          // 하이라이트 뒤 일반 텍스트: 블러
           segments.push(
-            <span key="after" className="text-zinc-700">
+            <span
+              key="after"
+              className="text-zinc-700"
+              style={{ filter: 'blur(1.5px)', opacity: 0.4 }}
+            >
               {remaining}
             </span>
           )
@@ -603,11 +566,13 @@ export default function EditorClient({
           </div>
         )
 
-        // 선택된 하이라이트 상세
+        // 선택된 하이라이트 상세 (item 2: 예시 문장 회색 pre-fill)
         lineHighlights.forEach((hl) => {
           if (selectedHighlightIdx === hl.hlIdx) {
             const isPositive = hl.type === 'positive'
-            
+            // editText가 예시 문장과 같으면 회색, 직접 입력하면 기본 색
+            const isExamplePrefill = hl.example ? editText === hl.example : false
+
             result.push(
               <div
                 key={`detail-${hl.hlIdx}`}
@@ -637,10 +602,15 @@ export default function EditorClient({
                       type="text"
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
+                      onFocus={(e) => e.target.select()}
                       placeholder="수정할 문장을 입력하세요"
                       autoFocus
-                      className="w-full text-zinc-900 bg-transparent border-b border-zinc-200 pb-2 focus:outline-none focus:border-zinc-900"
-                      style={{ fontSize: `${fontSize}px` }}
+                      className="w-full bg-transparent border-b border-zinc-200 pb-2 focus:outline-none focus:border-zinc-900"
+                      style={{
+                        fontSize: `${fontSize}px`,
+                        // 예시 문장이 그대로면 회색, 직접 타이핑하면 진한 색 (item 2)
+                        color: isExamplePrefill ? '#a1a1aa' : '#18181b',
+                      }}
                     />
                     <button
                       onClick={handleApplyEdit}
@@ -743,29 +713,6 @@ export default function EditorClient({
             <div className="h-px bg-zinc-100" />
           </div>
 
-          {/* 스캔 오버레이 */}
-          {feedbackMode === 'scanning' && (
-            <div
-              className="absolute inset-0 z-10 pointer-events-none"
-              style={{ 
-                backdropFilter: 'blur(2px)', 
-                backgroundColor: 'rgba(255,255,255,0.6)',
-                top: 0
-              }}
-            >
-              <div className="absolute top-20 left-0 right-0 flex justify-center">
-                <div className="bg-zinc-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg">
-                  피드백을 위해 글을 분석하고 있어요
-                </div>
-              </div>
-              
-              <div
-                className="h-1 bg-gradient-to-r from-transparent via-zinc-900/30 to-transparent"
-                style={{ animation: 'scan 2s ease-in-out infinite' }}
-              />
-            </div>
-          )}
-
           {/* 피드백 구조 배너 */}
           {feedbackMode === 'result' && feedbackData && (
             <div className="px-4 pb-4">
@@ -782,7 +729,100 @@ export default function EditorClient({
           )}
 
           {/* 본문 */}
-          <div className="px-4 pb-32">{renderBody()}</div>
+          <div className="px-4 pb-32">
+            {/* contentEditable wrapper — 항상 DOM에 유지 (피드백 후 초기화 방지 — item 4) */}
+            <div style={{ display: feedbackMode !== 'off' ? 'none' : 'block' }}>
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={handleEditorInput}
+                data-placeholder="떠오르는 장면부터 써봐요..."
+                className="w-full text-zinc-700 leading-[1.8] focus:outline-none bg-transparent editor-content"
+                style={{
+                  fontSize: `${fontSize}px`,
+                  minHeight: '50vh',
+                  paddingBottom: keyboardHeight > 0 ? '80px' : '120px',
+                  wordBreak: 'break-word',
+                }}
+              />
+
+              {showAutoSaveTip && (
+                <div className="mt-2 text-xs text-zinc-400">자동으로 저장돼요.</div>
+              )}
+
+              {/* 이어쓰기 로딩 */}
+              {isFetchingSuggest && !showSuggest && (
+                <div className="mt-2 flex items-center gap-2 text-zinc-400">
+                  <div className="flex gap-1">
+                    <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1 h-1 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <span className="text-xs">다음 문장 제안 중...</span>
+                </div>
+              )}
+
+              {/* 이어쓰기 제안 */}
+              {showSuggest && (
+                <div className="relative mt-2">
+                  <div className="flex items-start gap-2">
+                    <span className="text-zinc-400 leading-[1.8]" style={{ fontSize: `${fontSize}px`, fontStyle: 'italic' }}>{suggestion}</span>
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        onClick={handleAccept}
+                        className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-sm font-bold"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        onClick={handleReject}
+                        className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-sm font-bold"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                  {showTooltip && (
+                    <div className="absolute -top-10 left-0 bg-zinc-900 text-white text-[11px] px-3 py-2 rounded-lg whitespace-nowrap shadow-lg">
+                      ✓ 수락 · × 거절
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 참고 메모 */}
+              {referenceMemos.map(memo => (
+                <div
+                  key={memo.id}
+                  className="relative my-4 bg-blue-50 border border-blue-200 rounded-lg p-3"
+                  style={{ borderStyle: 'dashed' }}
+                >
+                  <button
+                    onClick={() => handleDeleteMemo(memo.id)}
+                    className="absolute top-2 right-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-zinc-400 hover:text-zinc-600"
+                    style={{ fontSize: '24px' }}
+                  >
+                    ×
+                  </button>
+                  <div className="text-[12px] text-blue-700 font-medium mb-1">
+                    📝 참고 메모
+                  </div>
+                  <div
+                    contentEditable
+                    suppressContentEditableWarning
+                    className="text-[14px] text-zinc-700 leading-relaxed outline-none pr-10"
+                    style={{ fontSize: `${Math.max(14, fontSize - 2)}px` }}
+                  >
+                    {memo.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 피드백 뷰 (scanning 블러 미리보기 / result 하이라이트) */}
+            {renderBody()}
+          </div>
 
           {/* 피드백 제안 박스 */}
           {feedbackMode === 'result' && feedbackData && (
@@ -799,7 +839,7 @@ export default function EditorClient({
                   onClick={handleAddReference}
                   className="min-h-[44px] px-3 py-1.5 text-xs text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors"
                 >
-                  📝 아래에 추가하기
+                  📝 본문에서 써보기
                 </button>
               </div>
             </div>
@@ -883,10 +923,6 @@ export default function EditorClient({
       )}
 
       <style>{`
-        @keyframes scan {
-          0% { transform: translateY(0); }
-          100% { transform: translateY(calc(100vh - 14rem)); }
-        }
         @keyframes slideDown {
           from { opacity: 0; transform: translateY(-10px); }
           to { opacity: 1; transform: translateY(0); }

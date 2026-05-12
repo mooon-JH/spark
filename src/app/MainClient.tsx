@@ -89,9 +89,9 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
       const topicId = currentCard?.id
       const navigate = () => {
         if (topicId) {
-          router.push(`/editor?topicId=${topicId}&initialBody=${encodeURIComponent(value)}`)
+          router.push(`/editor?topicId=${topicId}&initialBody=${encodeURIComponent(value)}&newDoc=true`)
         } else {
-          router.push(`/editor?free=true&initialBody=${encodeURIComponent(value)}`)
+          router.push(`/editor?free=true&initialBody=${encodeURIComponent(value)}&newDoc=true`)
         }
       }
 
@@ -100,7 +100,7 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           setExpandState('open')
-          setTimeout(navigate, 320)
+          setTimeout(navigate, 150) // 320ms → 150ms (item 5a)
         })
       })
     }

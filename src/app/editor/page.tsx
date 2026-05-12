@@ -9,6 +9,8 @@ type SearchParams = Promise<{
   free?: string
   from?: string      // 'archive'면 아카이브로 복귀
   writingId?: string // 기존 글 수정 시
+  newDoc?: string    // 홈에서 새 글로 진입 시 (getDraft 생략용)
+  initialBody?: string // 홈 입력창에서 넘어온 초기 텍스트
 }>
 
 async function EditorData({
@@ -17,12 +19,16 @@ async function EditorData({
   userId,
   returnTo,
   existingWritingId,
+  isNewDoc,
+  initialBody,
 }: {
   topicId: string | null
   isFree: boolean
   userId: string
   returnTo: 'home' | 'archive'
   existingWritingId: string | null
+  isNewDoc: boolean
+  initialBody: string
 }) {
   const supabase = await createClient()
 
@@ -30,7 +36,9 @@ async function EditorData({
     topicId
       ? supabase.from('topics').select('content').eq('id', topicId).single()
       : Promise.resolve({ data: null }),
-    // 기존 글 수정이면 writingId로 조회, 아니면 topicId로 draft 조회
+    // 기존 글 수정이면 writingId로 조회
+    // 새 글(newDoc)이면 getDraft 생략 → 불필요한 서버 fetch 제거 (item 5b)
+    // 아니면 topicId로 이어쓰던 draft 조회
     existingWritingId
       ? supabase
           .from('writings')
@@ -39,7 +47,9 @@ async function EditorData({
           .eq('user_id', userId)
           .single()
           .then((r) => r.data ?? null)
-      : getDraft({ userId, topicId }),
+      : isNewDoc
+        ? Promise.resolve(null)
+        : getDraft({ userId, topicId }),
   ])
 
   const topicContent =
@@ -55,6 +65,7 @@ async function EditorData({
       isFree={isFree}
       draft={draft as Parameters<typeof EditorClient>[0]['draft']}
       returnTo={returnTo}
+      initialBody={initialBody}
     />
   )
 }
@@ -71,9 +82,10 @@ export default async function EditorPage({
 
   if (!user) redirect('/login')
 
-  const { topicId, free, from, writingId } = await searchParams
+  const { topicId, free, from, writingId, newDoc, initialBody } = await searchParams
   const isFree = free === 'true'
   const returnTo: 'home' | 'archive' = from === 'archive' ? 'archive' : 'home'
+  const isNewDoc = newDoc === 'true'
 
   if (!isFree && !topicId && !writingId) redirect('/')
 
@@ -85,6 +97,8 @@ export default async function EditorPage({
         userId={user.id}
         returnTo={returnTo}
         existingWritingId={writingId ?? null}
+        isNewDoc={isNewDoc}
+        initialBody={initialBody ?? ''}
       />
     </Suspense>
   )
