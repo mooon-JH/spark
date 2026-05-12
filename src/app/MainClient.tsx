@@ -11,6 +11,8 @@ type Props = {
   initialCards: TopicCard[]
 }
 
+type ExpandRect = { top: number; right: number; bottom: number; left: number }
+
 export default function MainClient({ userId, nickname, initialCards }: Props) {
   const router = useRouter()
   const [cards, setCards] = useState<TopicCard[]>(initialCards)
@@ -20,6 +22,14 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
   const [inputValue, setInputValue] = useState('')
   const [mounted, setMounted] = useState(false)
   const hasNavigated = useRef(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // 확장 전환 애니메이션
+  const [expandState, setExpandState] = useState<'idle' | 'init' | 'open'>('idle')
+  const [expandRect, setExpandRect] = useState<ExpandRect | null>(null)
+
+  // 좋아요 시각 피드백
+  const [likedCardId, setLikedCardId] = useState<string | null>(null)
 
   // 진입 페이드인
   useEffect(() => {
@@ -49,6 +59,10 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
 
   const handleFeedback = async (feedback: 'like' | 'dislike') => {
     if (!currentCard) return
+    if (feedback === 'like') {
+      setLikedCardId(currentCard.id)
+      setTimeout(() => setLikedCardId(null), 800)
+    }
     await recordTopicFeedback(userId, currentCard.id, feedback)
     if (feedback === 'dislike') handleNext()
   }
@@ -57,12 +71,39 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
     const value = e.target.value
     if (value.length > 0 && !hasNavigated.current) {
       hasNavigated.current = true
-      const topicId = currentCard?.id
-      if (topicId) {
-        router.push(`/editor?topicId=${topicId}&initialBody=${encodeURIComponent(value)}`)
-      } else {
-        router.push(`/editor?free=true&initialBody=${encodeURIComponent(value)}`)
+
+      // 입력창 위치 캡처
+      const el = inputRef.current
+      if (el) {
+        const rect = el.getBoundingClientRect()
+        const vw = window.innerWidth
+        const vh = window.innerHeight
+        setExpandRect({
+          top: rect.top,
+          right: vw - rect.right,
+          bottom: vh - rect.bottom,
+          left: rect.left,
+        })
       }
+
+      // 이동할 URL
+      const topicId = currentCard?.id
+      const navigate = () => {
+        if (topicId) {
+          router.push(`/editor?topicId=${topicId}&initialBody=${encodeURIComponent(value)}`)
+        } else {
+          router.push(`/editor?free=true&initialBody=${encodeURIComponent(value)}`)
+        }
+      }
+
+      // init → (rAF×2) → open → navigate
+      setExpandState('init')
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setExpandState('open')
+          setTimeout(navigate, 320)
+        })
+      })
     }
   }
 
@@ -84,6 +125,20 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
         transition: 'opacity 0.3s ease, transform 0.3s ease',
       }}
     >
+      {/* 확장 전환 오버레이 — 입력창 위치에서 전체 화면으로 열림 */}
+      {expandState !== 'idle' && expandRect && (
+        <div
+          className="fixed inset-0 bg-white z-50 pointer-events-none"
+          style={{
+            clipPath: expandState === 'init'
+              ? `inset(${expandRect.top}px ${expandRect.right}px ${expandRect.bottom}px ${expandRect.left}px round 16px)`
+              : 'inset(0px 0px 0px 0px round 0px)',
+            transition: expandState === 'open'
+              ? 'clip-path 0.38s cubic-bezier(0.4, 0, 0.2, 1)'
+              : 'none',
+          }}
+        />
+      )}
       {/* 헤더 */}
       <header className="px-5 pt-12 pb-4 flex items-center justify-between">
         <span className="text-[15px] text-zinc-800">{nickname}님, 안녕하세요</span>
@@ -135,8 +190,22 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
 
             {/* 좋아요 / 싫어요 — SVG 미니멀 아이콘 */}
             <div className="flex justify-center gap-8 mb-8">
-              <button onClick={() => handleFeedback('like')} aria-label="좋아요" className="group p-2">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-300 group-hover:text-zinc-700 transition-colors">
+              <button
+                onClick={() => handleFeedback('like')}
+                aria-label="좋아요"
+                className="group p-2"
+              >
+                <svg
+                  width="18" height="18" viewBox="0 0 24 24"
+                  fill={likedCardId === currentCard?.id ? 'currentColor' : 'none'}
+                  stroke="currentColor" strokeWidth="1.5"
+                  strokeLinecap="round" strokeLinejoin="round"
+                  style={{
+                    color: likedCardId === currentCard?.id ? '#71717a' : undefined,
+                    transition: 'color 0.2s ease, fill 0.2s ease',
+                  }}
+                  className={likedCardId === currentCard?.id ? 'text-zinc-500' : 'text-zinc-300 group-hover:text-zinc-700 transition-colors'}
+                >
                   <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z" />
                   <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
                 </svg>
@@ -151,6 +220,7 @@ export default function MainClient({ userId, nickname, initialCards }: Props) {
 
             {/* 입력창 pulse */}
             <input
+              ref={inputRef}
               type="text"
               value={inputValue}
               onChange={handleInputChange}

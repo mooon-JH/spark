@@ -113,6 +113,7 @@ export default function EditorClient({
   const [feedbackError, setFeedbackError] = useState(false)
   const [selectedHighlightIdx, setSelectedHighlightIdx] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
+  const [showFeedbackHint, setShowFeedbackHint] = useState(false)
 
   // ── refs ────────────────────────────────────────────────────
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -332,6 +333,16 @@ export default function EditorClient({
     setReferenceMemos(referenceMemos.filter(m => m.id !== id))
   }
 
+  // ── 피드백 버튼 비활성 안내 ────────────────────────────────
+  const handleFeedbackButtonTap = () => {
+    if (!canFeedback) {
+      setShowFeedbackHint(true)
+      setTimeout(() => setShowFeedbackHint(false), 2000)
+      return
+    }
+    handleFeedback()
+  }
+
   // ── 글자 크기 조절 ──────────────────────────────────────────
   const decreaseFontSize = () => {
     setFontSize(prev => Math.max(14, prev - 2))
@@ -460,6 +471,11 @@ export default function EditorClient({
     // 피드백 모드
     if (!feedbackData) return null
 
+    // 매칭 가능한 하이라이트만 필터 (폴백: 매칭 없어도 피드백 배너는 유지)
+    const matchedHighlights = feedbackData.highlights.filter((hl) =>
+      body.includes(hl.text)
+    )
+
     const lines = body.split('\n')
     const result: ReactElement[] = []
 
@@ -469,7 +485,7 @@ export default function EditorClient({
         return
       }
 
-      const lineHighlights = feedbackData.highlights
+      const lineHighlights = matchedHighlights
         .map((hl, hlIdx) => ({ ...hl, hlIdx }))
         .filter((hl) => line.includes(hl.text))
 
@@ -756,43 +772,37 @@ export default function EditorClient({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => insertFormat('**', textareaRef, setBody, scheduleAutosave)}
-                  className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm font-bold"
-                >
-                  B
-                </button>
-                <button
-                  onClick={() => insertFormat('*', textareaRef, setBody, scheduleAutosave)}
-                  className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-sm italic"
-                >
-                  I
-                </button>
-                <div className="h-6 w-px bg-zinc-200 mx-1" />
-                <button
                   onClick={decreaseFontSize}
-                  className="min-w-[44px] min-h-[44px] w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
+                  className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
                 >
                   −
                 </button>
-                <span className="text-sm text-zinc-600 w-6 text-center">{fontSize}</span>
+                <span className="text-sm text-zinc-500 w-6 text-center">{fontSize}</span>
                 <button
                   onClick={increaseFontSize}
-                  className="min-w-[44px] min-h-[44px] w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
+                  className="min-w-[44px] min-h-[44px] w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
                 >
                   +
                 </button>
               </div>
-              <button
-                onClick={handleFeedback}
-                disabled={!canFeedback || feedbackMode !== 'off'}
-                className={`min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  canFeedback && feedbackMode === 'off'
-                    ? 'bg-zinc-900 text-white hover:bg-zinc-700'
-                    : 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
-                }`}
-              >
-                ✦ 피드백
-              </button>
+              <div className="relative">
+                {showFeedbackHint && (
+                  <div className="absolute -top-10 right-0 bg-zinc-800 text-white text-[11px] px-3 py-1.5 rounded-lg whitespace-nowrap shadow-md">
+                    50자 이상 쓰면 활성화돼요
+                  </div>
+                )}
+                <button
+                  onClick={handleFeedbackButtonTap}
+                  disabled={feedbackMode !== 'off'}
+                  className={`min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    canFeedback && feedbackMode === 'off'
+                      ? 'bg-zinc-900 text-white hover:bg-zinc-700'
+                      : 'bg-zinc-100 text-zinc-400'
+                  }`}
+                >
+                  ✦ 피드백
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -837,31 +847,3 @@ function SaveIndicator({ status }: { status: SaveStatus }) {
   return <span className={`text-xs ${cls}`}>{text}</span>
 }
 
-function insertFormat(
-  marker: string,
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
-  setBody: (v: string) => void,
-  scheduleAutosave: () => void
-) {
-  const el = textareaRef.current
-  if (!el) return
-  const start = el.selectionStart
-  const end = el.selectionEnd
-  const cur = el.value
-  let next: string
-  let cursor: number
-  if (start !== end) {
-    const sel = cur.slice(start, end)
-    next = cur.slice(0, start) + marker + sel + marker + cur.slice(end)
-    cursor = end + marker.length * 2
-  } else {
-    next = cur.slice(0, start) + marker + marker + cur.slice(start)
-    cursor = start + marker.length
-  }
-  setBody(next)
-  scheduleAutosave()
-  requestAnimationFrame(() => {
-    el.focus()
-    el.setSelectionRange(cursor, cursor)
-  })
-}

@@ -29,6 +29,7 @@ export async function fetchArchiveProfile(userId: string): Promise<ArchiveProfil
       .from('writings')
       .select('created_at')
       .eq('user_id', userId)
+      .neq('is_system', true)   // 소개 글 통계 제외
       .order('created_at', { ascending: false }),
   ])
 
